@@ -80,4 +80,4 @@
 [Markdown]
 ![Figure](猫.jpg)
 [HTML]
-<p><img src="猫.jpg" alt="Figure" width="400" height="300"></p>
+<p><img src="猫.jpg" alt="Figure"></p>

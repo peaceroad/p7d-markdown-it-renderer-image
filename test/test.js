@@ -1,13 +1,19 @@
-const assert = require('assert');
-const fs = require('fs');
-const md = require('markdown-it')();
-const mdLazy = require('markdown-it')();
-const mdEnvPat = require('markdown-it')();
-const mdRendererImage = require('../index.js');
+import assert from 'assert'
+import fs from 'fs'
+import path from 'path'
+import mdit from 'markdown-it'
+import mditRendererImage from '../index.js'
 
-md.use(mdRendererImage, {scaleSuffix: true, resize: true});
-mdLazy.use(mdRendererImage, {scaleSuffix: true, lazyLoad: true});
-mdEnvPat.use(mdRendererImage, {scaleSuffix: true, resize: true, mdPath: __dirname + '/examples.md'});
+let __dirname = path.dirname(new URL(import.meta.url).pathname)
+const isWindows = (process.platform === 'win32')
+if (isWindows) {
+  __dirname = __dirname.replace(/^\/+/, '').replace(/\//g, '\\')
+}
+
+const md = mdit().use(mditRendererImage, {scaleSuffix: true, resize: true});
+const mdLazy = mdit().use(mditRendererImage, {scaleSuffix: true, lazyLoad: true});
+const mdEnvPat = mdit().use(mditRendererImage, {scaleSuffix: true, resize: true, mdPath: __dirname + '/examples.md'});
+
 
 const example = __dirname + '/examples.txt';
 let mdPat = __dirname + '/examples.md';

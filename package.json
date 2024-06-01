@@ -1,8 +1,9 @@
 {
   "name": "@peaceroad/markdown-it-renderer-image",
-  "version": "0.1.9",
+  "version": "0.2.0",
   "description": "A markdown-it plugin. This add width and height attributes to img elements.",
   "main": "index.js",
+  "type": "module",
   "scripts": {
     "test": "node ./test/test.js"
   },
@@ -17,10 +18,10 @@
   },
   "homepage": "https://github.com/peaceroad/p7d-markdown-it-renderer-image#readme",
   "dependencies": {
-    "image-size": "^1.0.0",
-    "sync-fetch": "^0.4.1"
+    "image-size": "^1.1.1",
+    "sync-fetch": "^0.5.2"
   },
   "devDependencies": {
-    "markdown-it": "^12.1.0"
+    "markdown-it": "^14.1.0"
   }
 }

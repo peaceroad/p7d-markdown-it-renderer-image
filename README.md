@@ -5,10 +5,10 @@ A markdown-it plugin. This add width and height attributes to img elements.
 ## Use
 
 ```js
-const fs = require('fs');
-const md = require('markdown-it')();
-const mdRendererImage = require('@peaceroad/markdown-it-renderer-image');
-md.use(mdRendererImage);
+import fs from 'fs'
+import mdit from 'markdown-it'
+import mditRendererImage from '@peaceroad/markdown-it-renderer-image'
+const md = mdit().use(mditRendererImage);
 
 const mdPat = '/tmp/markdown.md';
 const mdCont = fs.readFileSync(mdPat, 'utf-8');
@@ -22,11 +22,11 @@ console.log(md.render(mdCont, {mdPath: mdPat}));
 Or,
 
 ```js
-const fs = require('fs');
-const md = require('markdown-it')();
-const mdRendererImage = require('@peaceroad/markdown-it-renderer-image');
+import fs from 'fs'
+import mdit from 'markdown-it'
+import mditRendererImage from '@peaceroad/markdown-it-renderer-image'
 const mdPat = '/tmp/markdown.md';
-md.use(mdRendererImage, {mdPath: mdPat});
+const md = mdit().use(mditRendererImage, {mdPath: mdPat});
 const mdCont = fs.readFileSync(mdPat, 'utf-8');
 
 console.log(md.render(mdCont));
@@ -39,7 +39,7 @@ console.log(md.render(mdCont));
 You can adjust the height and width attributes by using the option `{scaleSuffix: true}`.
 
 ```js
-md.use(mdRendererImage, {scaleSuffix: true});
+const md = mdit().use(mditRendererImage, {scaleSuffix: true});
 
 console.log(md.render('![A cat.](cat@2x.jpg)', {mdPath: mdPat}));
 // <p><img src="cat@2x.jpg" alt="A cat." width="200" height="150"></p>
@@ -59,7 +59,7 @@ This is identified by `imageFileName.match(/[@._-]([0-9]+)(x|dpi|ppi)$/)`
 Option to resize based on the value of the title attribute: `{resize: true}`
 
 ```js
-md.use(mdRendererImage, {resize: true});
+const md = mdit().use(mditRendererImage, {resize: true});
 
 console.log(md.render('![A cat.](cat.jpg "Resize:50%")', {mdPath: mdPat}));
 // <p><img src="cat.jpg" alt="A cat." width="200" height="150"></p>
@@ -91,7 +91,7 @@ Notice: Other Markdown extended notations may specify a caption in the title att
 By using `{lazyLoad: true}`, it can have `loading="lazy"` attribute.
 
 ```js
-md.use(mdRendererImage, {lazyLoad: true});
+const md = mdit.use(mditRendererImage, {lazyLoad: true});
 
 console.log(md.render('![A cat.](cat@.jpg)', {mdPath: mdPat}));
 // <p><img src="cat.jpg" alt="A cat." loading="lazy" width="400" height="300"></p>
@@ -102,7 +102,7 @@ console.log(md.render('![A cat.](cat@.jpg)', {mdPath: mdPat}));
 By using `{asyncDecode: true}`, it can have `decoding="async"` attribute.
 
 ```js
-md.use(mdRendererImage, {asyncDecode: true});
+const md = mdit().use(mditRendererImage, {asyncDecode: true});
 
 console.log(md.render('![A cat.](cat@.jpg)', {mdPath: mdPat}));
 // <p><img src="cat.jpg" alt="A cat." decoding="async" width="400" height="300"></p>
