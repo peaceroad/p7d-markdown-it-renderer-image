@@ -146,7 +146,7 @@ const mditRendererImage = (md, option) => {
       try {
         imgData = sizeOf(imgSrc);
       } catch {
-        console.error('[renderder-image]Can\'t load image: ' + imgSrc);
+        console.error('[renderer-image]Can\'t load image: ' + imgSrc);
       }
       if (imgData.width !== undefined) {
         setImgSize(token, imgSrc, imgData, option);

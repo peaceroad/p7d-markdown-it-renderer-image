@@ -107,3 +107,7 @@ const md = mdit().use(mditRendererImage, {asyncDecode: true});
 console.log(md.render('![A cat.](cat@.jpg)', {mdPath: mdPat}));
 // <p><img src="cat.jpg" alt="A cat." decoding="async" width="400" height="300"></p>
 ```
+
+### Check image extension
+
+By default, the image (extension) that specifies the width and height is limited to png, jpg, jpeg, gif, webp, and svg [0.3.0+]. If you want to change this, modify the option setting `{checkImgExtensions: 'png,jpg,jpeg,gif,webp,svg' }`.
