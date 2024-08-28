@@ -24,11 +24,18 @@ const setImgSize = (token, img, imgData, option) => {
   }
   const imgTitle = token.attrGet('title');
   if (imgTitle && option.resize) {
-    const resizeReg = /(?:(?:(?:大きさ|サイズ)の?変更|リサイズ|resize(?:d to)?)? *[:：]? *([0-9]+)([%％]|px)|([0-9]+)([%％]|px)に(?:(?:大きさ|サイズ)を?変更|リサイズ))/i;
+    const resizeReg = /(?:(?:(?:大きさ|サイズ)の?変更|リサイズ|resize(?:d to)?) *[:：]? *([0-9]+)([%％]|px)|([0-9]+)([%％]|px)[にへ](?:(?:大きさ|サイズ)を?変更|リサイズ))/i;
     const hasResizeSetting = imgTitle.match(resizeReg);
+    //console.log('hasResizeSetting: ' + hasResizeSetting);
     if(hasResizeSetting) {
-      const resizeValue = +hasResizeSetting[1];
-      const resizeUnit = hasResizeSetting[2];
+      let resizeValue, resizeUnit;
+      if (hasResizeSetting[1]) {
+        resizeValue = +hasResizeSetting[1];
+        resizeUnit = hasResizeSetting[2];
+      } else {
+        resizeValue = +hasResizeSetting[3];
+        resizeUnit = hasResizeSetting[4];
+      }
       //console.log('w: ' + w + ', h: ' + h);
       if (resizeUnit.match(/[%％]/)) {
         w = Math.round(w * resizeValue / 100);
@@ -80,6 +87,7 @@ const mditRendererImage = (md, option) => {
     lazyLoad: false,
     resize: false,
     asyncDecode: false,
+    checkImgExtensions: 'png,jpg,jpeg,gif,webp,svg',
   };
   if (option !== undefined) {
     for (let o in option) {
@@ -108,6 +116,15 @@ const mditRendererImage = (md, option) => {
       imgCont = addLazyLoad(imgCont, option);
     }
 
+    if (opt.checkImgExtensions !== '') {
+      const isImgReg = new RegExp('\\.(?:' + opt.checkImgExtensions.split(',').join('|') + ')$', 'i')
+      const isImg = isImgReg.test(imgSrc)
+      if (!isImg) {
+        //console.error('[renderer-image]No image extension: ' + decodeURI(imgSrc));
+        return imgCont
+      }
+    }
+
     let isNotLocal = /^https?:\/\//.test(imgSrc);
     let imgData = {};
 
@@ -117,7 +134,7 @@ const mditRendererImage = (md, option) => {
         const buffer = response.buffer();
         imgData = sizeOf(buffer);
       } catch {
-        console.error('[renderder-image]No image: ' + imgSrc);
+        console.error('[renderer-image]Can\'t load image: ' + imgSrc);
       }
       if (imgData.width !== undefined) {
         setImgSize(token, imgSrc, imgData, option);
@@ -129,7 +146,7 @@ const mditRendererImage = (md, option) => {
       try {
         imgData = sizeOf(imgSrc);
       } catch {
-        console.error('[renderder-image]No image: ' + imgSrc);
+        console.error('[renderder-image]Can\'t load image: ' + imgSrc);
       }
       if (imgData.width !== undefined) {
         setImgSize(token, imgSrc, imgData, option);
