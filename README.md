@@ -80,7 +80,7 @@ console.log(md.render('![Figure](cat@2x.jpg "resize:320px"))', {mdPath: mdPat}))
 // <p><img src="cat@2x.jpg" alt="Figure" title="resize:320px" width="320" height="240"></p>
 ```
 
-This is identified by `imageTitleAttribute.match(/(?:(?:(?:大きさ|サイズ)の?変更|リサイズ|resize(?:d to)?)? *[:：]? *([0-9]+)([%％]|px)|([0-9]+)([%％]|px)に(?:(?:大きさ|サイズ)を?変更|リサイズ))/i)`
+This is identified by `imgTitle.match(/(?:(?:(?:大きさ|サイズ)の?変更|リサイズ|resize(?:d to)?) *[:：]? *([0-9]+)([%％]|px)|([0-9]+)([%％]|px)[にへ](?:(?:大きさ|サイズ)を?変更|リサイズ))/i)`
 
 If `px` is specified, the numerical value is treated as the width after resizing.
 
