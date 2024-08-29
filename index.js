@@ -12,6 +12,7 @@ const setImgSize = (token, img, imgData, option) => {
     const reg = /[@._-]([0-9]+)(x|dpi|ppi)$/;
     const rs = imgName.match(reg);
     if (rs) {
+      rs[1] = +rs[1]
       if (rs[2] === 'x') {
         w = Math.round(w / rs[1]);
         h = Math.round(h / rs[1]);
@@ -75,7 +76,7 @@ const setLocalImgSrc = (imgSrc, option, env) => {
       }
     }
   }
-  img += path.sep + imgSrc;
+  img += path.sep + imgSrc.replace(/[/\\]/g, path.sep);
   img = decodeURI(img);
   return img;
 }
