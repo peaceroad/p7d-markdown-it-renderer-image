@@ -108,17 +108,13 @@ const mditRendererImage = (md, option) => {
     const hasSrcPath = isValidExt && srcPath
 
     const imgData = hasSrcPath ? getImgData(srcPath, isRemote) : {}
-    let width, height
     if (imgData.width !== undefined) {
       const imgName = path.basename(srcRaw, path.extname(srcRaw))
-      const size = setImgSize(imgName, imgData, opt.scaleSuffix, opt.resize, titleRaw)
-      width = size.width
-      height = size.height
-      token.attrJoin('width', width)
-      token.attrJoin('height', height)
+      const { width, height } = setImgSize(imgName, imgData, opt.scaleSuffix, opt.resize, titleRaw)
+      token.attrSet('width', width)
+      token.attrSet('height', height)
     }
 
-    // set token attributes, including any existing ones
     token.attrSet('src', safeSrc)
     token.attrSet('alt', alt)
     if (title) token.attrSet('title', title)
