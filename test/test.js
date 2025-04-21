@@ -40,6 +40,8 @@ while(n < ms0.length) {
   n++;
 }
 
+let pass = true
+
 n = 1;
 
 const h0 = md.render(fs.readFileSync('./test/test.md', 'utf-8').trim(), {'mdPath': './test/test.md'});
@@ -47,6 +49,7 @@ const c0 = '<p><img src="cat.jpg" alt="A cat" width="400" height="300"></p>\n';
 try {
   assert.strictEqual(h0, c0);
 } catch(e) {
+  pass = false
   console.log('incorrect(0): ');
   console.log('H: ' + h0 +'C: ' + c0);
 };
@@ -64,6 +67,7 @@ while(n < ms.length) {
   try {
     assert.strictEqual(h, ms[n].html);
   } catch(e) {
+    pass = false
     console.log('incorrect: ');
     console.log('H: ' + h +'C: ' + ms[n].html);
   };
@@ -73,6 +77,7 @@ while(n < ms.length) {
     try {
       assert.strictEqual(hLazy, ms[n].htmlLazy);
     } catch(e) {
+      pass = false
       console.log('incorrect(Lazy): ');
       console.log('H: ' + hLazy +'C: ' + ms[n].htmlLazy);
     };
@@ -83,6 +88,7 @@ while(n < ms.length) {
     try {
       assert.strictEqual(hEnvPat, ms[n].html);
     } catch(e) {
+      pass = false
       console.log('incorrect(mdEnvPat): ');
       console.log('H: ' + hEnvPat +'C: ' + ms[n].html);
     };
@@ -90,3 +96,5 @@ while(n < ms.length) {
 
   n++;
 }
+
+if (pass) console.log('\nAll tests passed')

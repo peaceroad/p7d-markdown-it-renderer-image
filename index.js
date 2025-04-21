@@ -1,84 +1,81 @@
 import path from 'path'
-import fetch from "sync-fetch"
-import sizeOf from 'image-size'
+import fetch from 'sync-fetch'
+import imageSize from 'image-size'
 
-const setImgSize = (token, img, imgData, option) => {
-  if (!imgData) return token;
-  let w = imgData.width;
-  let h = imgData.height;
-  //console.log('w: ' + w + ', h: ' + h);
-  const imgName = path.basename(img, path.extname(img));
-  if (option.scaleSuffix) {
-    const reg = /[@._-]([0-9]+)(x|dpi|ppi)$/;
-    const rs = imgName.match(reg);
+const scaleSuffixReg = /[@._-]([0-9]+)(x|dpi|ppi)$/
+const resizeReg = /(?:(?:(?:大きさ|サイズ)の?変更|リサイズ|resize(?:d to)?) *[:：]? *([0-9]+)([%％]|px)|([0-9]+)([%％]|px)[にへ](?:(?:大きさ|サイズ)を?変更|リサイズ))/i
+
+const setImgSize = (imgName, imgData, scaleSuffix, resize, title) => {
+  if (!imgData) return {}
+  let w = imgData.width
+  let h = imgData.height
+
+  if (scaleSuffix) {
+    const rs = imgName.match(scaleSuffixReg)
     if (rs) {
-      rs[1] = +rs[1]
+      const scale = +rs[1]
       if (rs[2] === 'x') {
-        w = Math.round(w / rs[1]);
-        h = Math.round(h / rs[1]);
+        w = Math.round(w / scale)
+        h = Math.round(h / scale)
       }
-      if (/(dpi|ppi)/.test(rs[2])) {
-        w = Math.round(w * 96 / rs[1]);
-        h = Math.round(h * 96 / rs[1]);
+      if (/[dp]pi/.test(rs[2])) {
+        w = Math.round(w * 96 / scale)
+        h = Math.round(h * 96 / scale)
       }
     }
   }
-  const imgTitle = token.attrGet('title');
-  if (imgTitle && option.resize) {
-    const resizeReg = /(?:(?:(?:大きさ|サイズ)の?変更|リサイズ|resize(?:d to)?) *[:：]? *([0-9]+)([%％]|px)|([0-9]+)([%％]|px)[にへ](?:(?:大きさ|サイズ)を?変更|リサイズ))/i;
-    const hasResizeSetting = imgTitle.match(resizeReg);
-    //console.log('hasResizeSetting: ' + hasResizeSetting);
-    if(hasResizeSetting) {
-      let resizeValue, resizeUnit;
+
+  if (title && resize) {
+    const hasResizeSetting = title.match(resizeReg)
+    if (hasResizeSetting) {
+      let resizeValue, resizeUnit
       if (hasResizeSetting[1]) {
-        resizeValue = +hasResizeSetting[1];
-        resizeUnit = hasResizeSetting[2];
+        resizeValue = +hasResizeSetting[1]
+        resizeUnit = hasResizeSetting[2]
       } else {
-        resizeValue = +hasResizeSetting[3];
-        resizeUnit = hasResizeSetting[4];
+        resizeValue = +hasResizeSetting[3]
+        resizeUnit = hasResizeSetting[4]
       }
-      //console.log('w: ' + w + ', h: ' + h);
       if (resizeUnit.match(/[%％]/)) {
-        w = Math.round(w * resizeValue / 100);
-        h = Math.round(h * resizeValue / 100);
+        h = Math.round(h * resizeValue / 100)
+        w = Math.round(w * resizeValue / 100)
       }
       if (resizeUnit.match(/px/)) {
-        const bw = w;
-        w = Math.round(resizeValue);
-        h = Math.round(h * resizeValue / bw);
+        h = Math.round(h * resizeValue / w)
+        w = Math.round(resizeValue)
       }
     }
   }
-  //console.log('w: ' + w + ', h: ' + h);
-  token.attrJoin('width', w);
-  token.attrJoin('height', h);
-  return token;
+
+  return { width: w, height: h }
 }
 
-const addAsyncDecode = (imgCont) => {
-  imgCont = imgCont.replace(/( *?\/)?>$/, ' decoding="async"$1>');
-  return imgCont;
-}
-
-const addLazyLoad = (imgCont) => {
-  imgCont = imgCont.replace(/( *?\/)?>$/, ' loading="lazy"$1>');
-  return imgCont;
-}
-
-const setLocalImgSrc = (imgSrc, option, env) => {
-  let img = '';
-  if (option.mdPath) {
-    img = path.dirname(option.mdPath);
-  } else {
-    if (env !== undefined) {
-      if (env.mdPath) {
-        img = path.dirname(env.mdPath);
-      }
-    }
+const getLocalImgSrc = (imgSrc, opt, env) => {
+  let dirPath = ''
+  if (opt.mdPath) {
+    dirPath = path.dirname(opt.mdPath)
+  } else if (env && env.mdPath) {
+    dirPath = path.dirname(env.mdPath)
   }
-  img += path.sep + imgSrc.replace(/[/\\]/g, path.sep);
-  img = decodeURI(img);
-  return img;
+  if (dirPath === '') return ''
+  return path.resolve(dirPath, imgSrc.replace(/[/\\]/g, path.sep))
+}
+
+const getImgData = (src, isRemote) => {
+  try {
+    let data, buffer
+    if (isRemote) {
+      const response = fetch(src)
+      buffer = response.buffer()
+      data = imageSize(buffer)
+    } else {
+      data = imageSize(src)
+    }
+    return data
+  } catch {
+    console.error("[renderer-image] Can't load image: " + src)
+    return {}
+  }
 }
 
 const mditRendererImage = (md, option) => {
@@ -88,74 +85,49 @@ const mditRendererImage = (md, option) => {
     lazyLoad: false,
     resize: false,
     asyncDecode: false,
-    checkImgExtensions: 'png,jpg,jpeg,gif,webp,svg',
-  };
-  if (option !== undefined) {
-    for (let o in option) {
-        opt[o] = option[o];
-    }
+    checkImgExtensions: 'png,jpg,jpeg,gif,webp',
   }
+  if (option) Object.assign(opt, option)
+
+  const imgExtReg = new RegExp('\\.(?:' + opt.checkImgExtensions.split(',').join('|') + ')$', 'i')
 
   md.renderer.rules['image'] = (tokens, idx, options, env, slf) => {
-    let endTagCont = '>';
-    if (options.xhtmlOut) {
-      endTagCont = ' />';
-    }
-    const token = tokens[idx];
-    let imgAlt = md.utils.escapeHtml(token.content);
-    let imgSrc = md.utils.escapeHtml(token.attrGet('src'));
-    let imgTitle = md.utils.escapeHtml(token.attrGet('title'));
-    let imgCont = '<img src="' + decodeURI(imgSrc) + '"' + endTagCont;
-    imgCont = imgCont.replace(/( src=".*?")/, '$1 alt="' + imgAlt + '"');
-    if (imgTitle) {
-      imgCont = imgCont.replace(/( *?\/)?>$/, ' title="' + imgTitle + '"$1>');
-    }
-    if (option.asyncDecode) {
-      imgCont = addAsyncDecode(imgCont, option);
-    }
-    if (option.lazyLoad) {
-      imgCont = addLazyLoad(imgCont, option);
+    const token = tokens[idx]
+    const endTag = options.xhtmlOut ? ' />' : '>'
+
+    const srcRaw = token.attrGet('src')
+    const src = md.utils.escapeHtml(srcRaw)
+    const safeSrc = decodeURI(src)
+    const alt = md.utils.escapeHtml(token.content)
+    const titleRaw = token.attrGet('title')
+    const title = md.utils.escapeHtml(titleRaw)
+
+    const isValidExt = imgExtReg.test(srcRaw)
+    const isRemote = /^https?:\/\//.test(srcRaw)
+    const srcPath = isRemote ? srcRaw : getLocalImgSrc(srcRaw, opt, env)
+    const hasSrcPath = isValidExt && srcPath
+
+    const imgData = hasSrcPath ? getImgData(srcPath, isRemote) : {}
+    let width, height
+    if (imgData.width !== undefined) {
+      const imgName = path.basename(srcRaw, path.extname(srcRaw))
+      const size = setImgSize(imgName, imgData, opt.scaleSuffix, opt.resize, titleRaw)
+      width = size.width
+      height = size.height
+      token.attrJoin('width', width)
+      token.attrJoin('height', height)
     }
 
-    if (opt.checkImgExtensions !== '') {
-      const isImgReg = new RegExp('\\.(?:' + opt.checkImgExtensions.split(',').join('|') + ')$', 'i')
-      const isImg = isImgReg.test(imgSrc)
-      if (!isImg) {
-        //console.error('[renderer-image]No image extension: ' + decodeURI(imgSrc));
-        return imgCont
-      }
-    }
+    const attrs = [
+      `src="${safeSrc}"`,
+      `alt="${alt}"`,
+      ...(title ? [`title="${title}"`] : []),
+      ...(isValidExt && opt.asyncDecode ? ['decoding="async"'] : []),
+      ...(isValidExt && opt.lazyLoad ? ['loading="lazy"'] : []),
+      ...(width && height ? [`width="${width}"`, `height="${height}"`] : [])
+    ]
 
-    let isNotLocal = /^https?:\/\//.test(imgSrc);
-    let imgData = {};
-
-    if (isNotLocal) {
-      try {
-        const response = fetch(imgSrc);
-        const buffer = response.buffer();
-        imgData = sizeOf(buffer);
-      } catch {
-        console.error('[renderer-image]Can\'t load image: ' + imgSrc);
-      }
-      if (imgData.width !== undefined) {
-        setImgSize(token, imgSrc, imgData, option);
-        imgCont = imgCont.replace(/( *?\/)?>$/, ' width="' + token.attrGet('width') + '" height="' + token.attrGet('height') + '"$1>');
-      }
-
-    } else {
-      imgSrc = setLocalImgSrc(imgSrc, option, env)
-      try {
-        imgData = sizeOf(imgSrc);
-      } catch {
-        console.error('[renderer-image]Can\'t load image: ' + imgSrc);
-      }
-      if (imgData.width !== undefined) {
-        setImgSize(token, imgSrc, imgData, option);
-        imgCont = imgCont.replace(/( *?\/)?>$/, ' width="' + token.attrGet('width') + '" height="' + token.attrGet('height') + '"$1>');
-      }
-    }
-
-    return imgCont;
+    return `<img ${attrs.join(' ')}${endTag}`
   }
 }
 
