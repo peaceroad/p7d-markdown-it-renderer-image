@@ -11,6 +11,7 @@ if (isWindows) {
 }
 
 const md = mdit().use(mditRendererImage, {scaleSuffix: true, resize: true});
+//const mdLazy = mdit().use(mditRendererImage, {scaleSuffix: true, lazyLoad: true, asyncDecode: true});
 const mdLazy = mdit().use(mditRendererImage, {scaleSuffix: true, lazyLoad: true});
 const mdEnvPat = mdit().use(mditRendererImage, {scaleSuffix: true, resize: true, mdPath: __dirname + '/examples.md'});
 

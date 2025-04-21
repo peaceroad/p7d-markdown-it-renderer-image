@@ -118,16 +118,13 @@ const mditRendererImage = (md, option) => {
       token.attrJoin('height', height)
     }
 
-    const attrs = [
-      `src="${safeSrc}"`,
-      `alt="${alt}"`,
-      ...(title ? [`title="${title}"`] : []),
-      ...(isValidExt && opt.asyncDecode ? ['decoding="async"'] : []),
-      ...(isValidExt && opt.lazyLoad ? ['loading="lazy"'] : []),
-      ...(width && height ? [`width="${width}"`, `height="${height}"`] : [])
-    ]
-
-    return `<img ${attrs.join(' ')}${endTag}`
+    // set token attributes, including any existing ones
+    token.attrSet('src', safeSrc)
+    token.attrSet('alt', alt)
+    if (title) token.attrSet('title', title)
+    if (isValidExt && opt.asyncDecode) token.attrSet('decoding', 'async')
+    if (isValidExt && opt.lazyLoad) token.attrSet('loading', 'lazy')
+    return `<img${slf.renderAttrs(token)}${endTag}`
   }
 }
 
