@@ -1,6 +1,6 @@
 # p7d-markdown-it-renderer-image
 
-A markdown-it plugin. This add width and height attributes to img elements.
+A markdown-it plugin. This adds width and height attributes to img elements.
 
 ## Use
 
@@ -84,16 +84,33 @@ This is identified by `imgTitle.match(/(?:(?:(?:大きさ|サイズ)の?変更|�
 
 If `px` is specified, the numerical value is treated as the width after resizing.
 
+---
+
 Notice: Other Markdown extended notations may specify a caption in the title attribute. Therefore, think carefully about whether to enable this option.
+
+If you want to use resize functionality while hiding the title attribute from the final HTML output, you can combine this with next `{hideTitle: true}` option.
+
+---
+
+### Hiding title attribute
+
+By using `{hideTitle: true}`, removes the title attribute from img elements:
+
+```js
+const md = mdit().use(mditRendererImage, {hideTitle: true});
+
+console.log(md.render('![Alt text](image.jpg "resize: 50%")'));
+// <p><img src="image.jpg" alt="Alt text" width="200" height="150"></p>
+```
 
 ### Setting lazy load
 
 By using `{lazyLoad: true}`, it can have `loading="lazy"` attribute.
 
 ```js
-const md = mdit.use(mditRendererImage, {lazyLoad: true});
+const md = mdit().use(mditRendererImage, {lazyLoad: true});
 
-console.log(md.render('![A cat.](cat@.jpg)', {mdPath: mdPat}));
+console.log(md.render('![A cat.](cat.jpg)', {mdPath: mdPat}));
 // <p><img src="cat.jpg" alt="A cat." loading="lazy" width="400" height="300"></p>
 ```
 
@@ -104,10 +121,146 @@ By using `{asyncDecode: true}`, it can have `decoding="async"` attribute.
 ```js
 const md = mdit().use(mditRendererImage, {asyncDecode: true});
 
-console.log(md.render('![A cat.](cat@.jpg)', {mdPath: mdPat}));
+console.log(md.render('![A cat.](cat.jpg)', {mdPath: mdPat}));
 // <p><img src="cat.jpg" alt="A cat." decoding="async" width="400" height="300"></p>
 ```
 
 ### Check image extension
 
 By default, the image (extension) that specifies the width and height is limited to png, jpg, jpeg, gif, webp, and svg [0.3.0+]. If you want to change this, modify the option setting `{checkImgExtensions: 'png,jpg,jpeg,gif,webp,svg' }`.
+
+### Image source modification
+
+You can control how image sources are processed and modified:
+
+#### modifyImgSrc
+
+When `{modifyImgSrc: true}`, the plugin will modify image src attributes based on frontmatter metadata (lid, lmd, url). This is useful for converting local development paths to production URLs.
+
+```js
+const md = mdit().use(mditRendererImage, {modifyImgSrc: true});
+```
+
+#### imgSrcPrefix
+
+Adds a prefix to image URLs when used with the `url` frontmatter option:
+
+```js
+const md = mdit().use(mditRendererImage, {
+  modifyImgSrc: true,
+  imgSrcPrefix: 'https://cdn.example.com/'
+});
+```
+
+
+### YAML Frontmatter Options
+
+When `modifyImgSrc: true` is enabled, you can use these frontmatter options to control image source modification:
+
+- **lid** (Local Image Directory): Replaces the directory path in image URLs relative to the markdown file's directory, useful for converting local development paths to production paths
+- **lmd** (Local Media Directory): Similar to `lid` but specifically for media files, uses absolute paths and provides more granular control over media file paths (used in DOM/browser environments only)
+- **url**: Sets a base URL prefix for images
+
+#### Local Development and VS Code Environment
+
+```yaml
+---
+url: https://example.com/article/
+lid: images
+---
+
+![Sample Image](./images/sample.jpg)
+
+<!-- // Result: <img src="https://example.com/article/sample.jpg" alt="Sample Image" width="400" height="300"> -->
+```
+
+#### Browser DOM Manipulation
+
+```yaml
+---
+url: https://example.com/article/
+lmd: C:\Users\User\manuscript
+---
+
+![Sample Image](sample.jpg)
+
+<!-- // Result: <img src="https://example.com/article/sample.jpg" alt="Sample Image" width="400" height="300"> -->
+```
+
+Or with file:// protocol:
+
+```yaml
+---
+url: https://example.com/article/
+lmd: file:///C:/Users/User/manuscript
+---
+
+![Sample Image](sample.jpg)
+
+<!-- // Result: <img src="https://example.com/article/sample.jpg" alt="Sample Image" width="400" height="300"> -->
+```
+
+## Browser Support
+
+This plugin consists of three main components:
+
+- `index.js`: The main markdown-it plugin for server-side rendering and image attribute processing
+- `script/img-util.js`: Utility functions for image processing (shared between server and browser)
+- `script/set-img-attributes.js`: Browser-side functionality for setting image attributes directly in the DOM
+
+## Browser Usage
+
+This script is designed for browser environments only (requires DOM access).
+
+### Direct ES6 Module Import
+
+```html
+<script type="module">
+import setImgAttributes from '<package-directory>/script/set-img-attributes.js'
+
+// Set attributes for all existing images in the DOM
+// First parameter can be null when processing existing DOM images
+await setImgAttributes(null, {
+  scaleSuffix: true,
+  resize: true,
+  lazyLoad: true,
+  asyncDecode: true,
+  hideTitle: true
+})
+</script>
+```
+
+### With Bundler (Webpack, etc.)
+
+```js
+import setImgAttributes from '@peaceroad/markdown-it-renderer-image/script/set-img-attributes.js'
+
+// Example usage in your application
+txt.addEventListener('input', async () => {
+  let markdownCont = txt.value
+  // ... render HTML with markdown-it ...
+  html.innerHTML = renderedHtml
+  
+  try {
+    await setImgAttributes(markdownCont, {
+      scaleSuffix: true,
+      resize: true,
+      lazyLoad: true,
+      asyncDecode: false,
+      modifyImgSrc: true,
+      imgSrcPrefix: 'https://example.com/images/',
+      hideTitle: true
+    })
+  } catch (error) {
+    console.error('Error setting image attributes:', error)
+  }
+})
+```
+
+## Testing
+
+Run tests to verify functionality:
+
+- `npm test` - Run main plugin tests and YAML frontmatter tests
+- `npm run test:script` - Run browser script tests for DOM manipulation
+

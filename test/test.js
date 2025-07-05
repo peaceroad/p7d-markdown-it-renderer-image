@@ -43,9 +43,12 @@ while(n < ms0.length) {
 
 let pass = true
 
+console.log('===========================================================')
+console.log('test.js - examples.txt')
+
 n = 1;
 
-const h0 = md.render(fs.readFileSync('./test/test.md', 'utf-8').trim(), {'mdPath': './test/test.md'});
+const h0 = md.render(fs.readFileSync(__dirname + '/test.md', 'utf-8').trim(), {'mdPath': __dirname + '/test.md'});
 const c0 = '<p><img src="cat.jpg" alt="A cat" width="400" height="300"></p>\n';
 try {
   assert.strictEqual(h0, c0);

@@ -1,60 +1,13 @@
 import path from 'path'
 import fetch from 'sync-fetch'
 import imageSize from 'image-size'
-
-const scaleSuffixReg = /[@._-]([0-9]+)(x|dpi|ppi)$/
-const resizeReg = /(?:(?:(?:大きさ|サイズ)の?変更|リサイズ|resize(?:d to)?) *[:：]? *([0-9]+)([%％]|px)|([0-9]+)([%％]|px)[にへ](?:(?:大きさ|サイズ)を?変更|リサイズ))/i
-
-const setImgSize = (imgName, imgData, scaleSuffix, resize, title) => {
-  if (!imgData) return {}
-  let w = imgData.width
-  let h = imgData.height
-
-  if (scaleSuffix) {
-    const rs = imgName.match(scaleSuffixReg)
-    if (rs) {
-      const scale = +rs[1]
-      if (rs[2] === 'x') {
-        w = Math.round(w / scale)
-        h = Math.round(h / scale)
-      }
-      if (/[dp]pi/.test(rs[2])) {
-        w = Math.round(w * 96 / scale)
-        h = Math.round(h * 96 / scale)
-      }
-    }
-  }
-
-  if (title && resize) {
-    const hasResizeSetting = title.match(resizeReg)
-    if (hasResizeSetting) {
-      let resizeValue, resizeUnit
-      if (hasResizeSetting[1]) {
-        resizeValue = +hasResizeSetting[1]
-        resizeUnit = hasResizeSetting[2]
-      } else {
-        resizeValue = +hasResizeSetting[3]
-        resizeUnit = hasResizeSetting[4]
-      }
-      if (resizeUnit.match(/[%％]/)) {
-        h = Math.round(h * resizeValue / 100)
-        w = Math.round(w * resizeValue / 100)
-      }
-      if (resizeUnit.match(/px/)) {
-        h = Math.round(h * resizeValue / w)
-        w = Math.round(resizeValue)
-      }
-    }
-  }
-
-  return { width: w, height: h }
-}
+import { setImgSize, getFrontmatter, normalizeRelativePath } from './script/img-util.js'
 
 const getLocalImgSrc = (imgSrc, opt, env) => {
   let dirPath = ''
   if (opt.mdPath) {
     dirPath = path.dirname(opt.mdPath)
-  } else if (env && env.mdPath) {
+  } else if (env?.mdPath) {
     dirPath = path.dirname(env.mdPath)
   }
   if (dirPath === '') return ''
@@ -86,18 +39,49 @@ const mditRendererImage = (md, option) => {
     resize: false,
     asyncDecode: false,
     checkImgExtensions: 'png,jpg,jpeg,gif,webp',
+    modifyImgSrc: false,
+    imgSrcPrefix: '',
+    hideTitle: false,
   }
   if (option) Object.assign(opt, option)
 
   const imgExtReg = new RegExp('\\.(?:' + opt.checkImgExtensions.split(',').join('|') + ')$', 'i')
 
+  let cachedFrontmatter = null
+
   md.renderer.rules['image'] = (tokens, idx, options, env, slf) => {
     const token = tokens[idx]
     const endTag = options.xhtmlOut ? ' />' : '>'
 
-    const srcRaw = token.attrGet('src')
-    const src = md.utils.escapeHtml(srcRaw)
-    const safeSrc = decodeURI(src)
+    let srcRaw = token.attrGet('src')
+    let src = srcRaw
+
+    const frontmatter = env?.frontmatter || md.env?.frontmatter
+    if (opt.modifyImgSrc && frontmatter) {
+      if (!cachedFrontmatter || cachedFrontmatter.original !== frontmatter) {
+        cachedFrontmatter = { original: frontmatter }
+        Object.assign(cachedFrontmatter, getFrontmatter(frontmatter, opt))
+      }
+
+      const { url, lid } = cachedFrontmatter
+      if (!/^https?:\/\//.test(src)) {
+        if (lid) {
+          // Remove lid path from src if src starts with lid
+          if (src.startsWith(lid)) {
+            src = src.substring(lid.length)
+          } else if (src.startsWith('./') && ('.' + src).startsWith(lid)) {
+            // Handle ./path case
+            src = ('.' + src).substring(lid.length)
+          }
+        }
+        if (url) src = `${url}${src}`
+        src = normalizeRelativePath(src)
+      }
+      token.attrSet('src', src)
+    }
+
+    const escapedSrc = md.utils.escapeHtml(src)
+    const safeSrc = decodeURI(escapedSrc)
     const alt = md.utils.escapeHtml(token.content)
     const titleRaw = token.attrGet('title')
     const title = md.utils.escapeHtml(titleRaw)
@@ -117,7 +101,15 @@ const mditRendererImage = (md, option) => {
 
     token.attrSet('src', safeSrc)
     token.attrSet('alt', alt)
-    if (title) token.attrSet('title', title)
+    if (title && !opt.hideTitle) {
+      token.attrSet('title', title)
+    }
+    if (opt.hideTitle) {
+      const titleIndex = token.attrIndex('title')
+      if (titleIndex >= 0) {
+        token.attrs.splice(titleIndex, 1)
+      }
+    }
     if (isValidExt && opt.asyncDecode) token.attrSet('decoding', 'async')
     if (isValidExt && opt.lazyLoad) token.attrSet('loading', 'lazy')
     return `<img${slf.renderAttrs(token)}${endTag}`

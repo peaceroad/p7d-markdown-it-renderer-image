@@ -1,0 +1,10 @@
+[Markdown]
+---
+lid: images/
+url: https://example.com/article/
+---
+
+![](images/cat-runaway.jpg)
+
+[HTML]
+<p><img src="https://example.com/article/cat-runaway.jpg" alt="" width="400" height="300"></p>
