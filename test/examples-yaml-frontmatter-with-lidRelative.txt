@@ -8,3 +8,15 @@ url: https://example.com/article/
 
 [HTML]
 <p><img src="https://example.com/article/cat-runaway.jpg" alt="" width="400" height="300"></p>
+
+[Markdown]
+---
+lid: images/
+url: https://example.com/article/
+---
+
+![](/cat.jpg)
+
+[HTML]
+<p><img src="/cat.jpg" alt=""></p>
+
