@@ -51,7 +51,10 @@ export default async (markdownCont, option) => {
           originalImage.setAttribute('src', adjustedLmd + src)
         }
 
-        if (url) src = `${url}${src}`
+        // Only modify relative paths (not starting with '/'), absolute paths are kept as-is
+        if (url && !src.startsWith('/')) {
+          src = `${url}${src}`
+        }
       }
       // Normalize the final src to remove any relative path markers
       src = normalizeRelativePath(src)
