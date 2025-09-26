@@ -87,3 +87,11 @@
 ![Figure](猫)
 [HTML]
 <p><img src="猫" alt="Figure"></p>
+
+
+[Markdown]
+![](/cat.jpg)
+
+[HTML]
+<p><img src="/cat.jpg" alt=""></p>
+

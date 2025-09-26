@@ -10,22 +10,29 @@ const normalizeRelativePath = (path) => {
     const pathPart = urlSchemeMatch[2]
     return scheme + normalizeRelativePath(pathPart)
   }
+  
+  const isAbsolute = path.startsWith('/')
   const segments = path.split('/')
   const normalized = []
+  
   for (const segment of segments) {
-    if (segment === '.' || segment === '') {
+    if (segment === '.' || (segment === '' && !isAbsolute)) {
       continue
+    } else if (segment === '' && isAbsolute && normalized.length === 0) {
+      // Keep the first empty segment for absolute paths to preserve leading slash
+      normalized.push(segment)
     } else if (segment === '..') {
       if (normalized.length > 0 && normalized[normalized.length - 1] !== '..') {
         normalized.pop()
-      } else {
-        // Keep leading .. segments
+      } else if (!isAbsolute) {
+        // Keep leading .. segments for relative paths only
         normalized.push(segment)
       }
-    } else {
+    } else if (segment !== '') {
       normalized.push(segment)
     }
   }
+  
   return normalized.join('/')
 }
 

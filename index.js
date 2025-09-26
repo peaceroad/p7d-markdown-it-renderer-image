@@ -74,13 +74,18 @@ const mditRendererImage = (md, option) => {
             src = ('.' + src).substring(lid.length)
           }
         }
-        if (url) src = `${url}${src}`
+        // Only modify relative paths (not starting with '/'), absolute paths are kept as-is
+        if (url && !src.startsWith('/')) {
+          src = `${url}${src}`
+        }
         src = normalizeRelativePath(src)
       }
       token.attrSet('src', src)
     }
 
-    const escapedSrc = md.utils.escapeHtml(src)
+    // Use the potentially modified src for final processing
+    const finalSrc = token.attrGet('src') || src
+    const escapedSrc = md.utils.escapeHtml(finalSrc)
     const safeSrc = decodeURI(escapedSrc)
     const alt = md.utils.escapeHtml(token.content)
     const titleRaw = token.attrGet('title')

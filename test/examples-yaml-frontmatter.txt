@@ -18,3 +18,31 @@ url: https://example.com/article/number/
 
 [HTML]
 <p><img src="https://example.com/article/number/cat.jpg" alt="" width="400" height="300"></p>
+
+
+[Markdown]
+![](/cat.jpg)
+
+[HTML]
+<p><img src="/cat.jpg" alt=""></p>
+
+
+[Markdown]
+---
+url: https://example.com/article/number
+---
+
+![](/cat.jpg)
+
+[HTML]
+<p><img src="/cat.jpg" alt=""></p>
+
+[Markdown]
+---
+url: https://example.com/article/number/
+---
+
+![](/cat.jpg)
+
+[HTML]
+<p><img src="/cat.jpg" alt=""></p>
