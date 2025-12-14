@@ -28,3 +28,6 @@
 ## Testing
 - `npm test` for Node-side plugin + YAML frontmatter tests.
 - `npm run test:script` for browser-side DOM handling tests.
+
+## Browser Notes
+- Safari Technology Preview 222: `<figcaption>` inside `<figure>` contributes to `<img>` accessible name only when no `alt`, ARIA, or `title` is present (295746@main / 150597445).
