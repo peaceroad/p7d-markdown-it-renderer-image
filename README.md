@@ -127,7 +127,22 @@ console.log(md.render('![A cat.](cat.jpg)', {mdPath: mdPat}));
 
 ### Check image extension
 
-By default, the image (extension) that specifies the width and height is limited to png, jpg, jpeg, gif, webp, and svg [0.3.0+]. If you want to change this, modify the option setting `{checkImgExtensions: 'png,jpg,jpeg,gif,webp,svg' }`.
+By default, the image (extension) that specifies the width and height is limited to png, jpg, jpeg, gif, and webp. If you want to include other formats (for example svg), set `{checkImgExtensions: 'png,jpg,jpeg,gif,webp,svg' }`. Extensions are matched before query/hash, so `image.jpg?ver=1` is handled.
+
+### Remote image sizing
+
+Remote images are fetched synchronously to read dimensions (blocks until fetch completes). This is **enabled by default**; disable it explicitly if you do not want remote fetch during render:
+
+```js
+const md = mdit().use(mditRendererImage, {
+  disableRemoteSize: true, // opt out of remote fetch
+  remoteTimeout: 3000,      // ms timeout for remote fetch (default: 5000)
+  remoteMaxBytes: 16 * 1024 * 1024, // skip remote images larger than this when content-length is present (default 16MB)
+  suppressErrors: 'remote', // 'none' | 'all' | 'local' | 'remote'
+})
+```
+
+Image dimension results are cached per render (`cacheMax`: default 64 entries). Set `cacheMax: 0` to disable caching.
 
 ### Image source modification
 
@@ -263,4 +278,3 @@ Run tests to verify functionality:
 
 - `npm test` - Run main plugin tests and YAML frontmatter tests
 - `npm run test:script` - Run browser script tests for DOM manipulation
-
