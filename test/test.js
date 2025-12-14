@@ -10,10 +10,11 @@ if (isWindows) {
   __dirname = __dirname.replace(/^\/+/, '').replace(/\//g, '\\')
 }
 
-const md = mdit().use(mditRendererImage, {scaleSuffix: true, resize: true});
+const commonOpt = { scaleSuffix: true, resize: true }
+const md = mdit().use(mditRendererImage, commonOpt);
 //const mdLazy = mdit().use(mditRendererImage, {scaleSuffix: true, lazyLoad: true, asyncDecode: true});
-const mdLazy = mdit().use(mditRendererImage, {scaleSuffix: true, lazyLoad: true});
-const mdEnvPat = mdit().use(mditRendererImage, {scaleSuffix: true, resize: true, mdPath: __dirname + '/examples.md'});
+const mdLazy = mdit().use(mditRendererImage, { ...commonOpt, lazyLoad: true });
+const mdEnvPat = mdit().use(mditRendererImage, { ...commonOpt, mdPath: __dirname + '/examples.md' });
 
 
 const example = __dirname + '/examples.txt';

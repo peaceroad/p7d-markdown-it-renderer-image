@@ -1,13 +1,22 @@
 export default async (markdownCont, option) => {
   const { setImgSize, parseFrontmatter, getFrontmatter, normalizeRelativePath } = await import('./img-util.js')
+
+  const isHttpUrl = (value) => /^https?:\/\//i.test(value)
+  const isProtocolRelativeUrl = (value) => /^\/\//.test(value)
+  const isFileUrl = (value) => /^file:\/\//i.test(value)
+  const stripQueryHash = (value) => value.split(/[?#]/)[0]
+  const appendSuffix = (base, raw) => base + raw.slice(base.length)
+  const escapeForRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
   const getImageName = (imgSrc) => {
-    const lastDotIndex = imgSrc.lastIndexOf('.')
-    const lastSlashIndex = Math.max(imgSrc.lastIndexOf('/'), imgSrc.lastIndexOf('\\'))
+    const cleanSrc = stripQueryHash(imgSrc)
+    const lastDotIndex = cleanSrc.lastIndexOf('.')
+    const lastSlashIndex = Math.max(cleanSrc.lastIndexOf('/'), cleanSrc.lastIndexOf('\\'))
 
     if (lastDotIndex > lastSlashIndex) {
-      return imgSrc.substring(lastSlashIndex + 1, lastDotIndex)
+      return cleanSrc.substring(lastSlashIndex + 1, lastDotIndex)
     }
-    return imgSrc.substring(lastSlashIndex + 1)
+    return cleanSrc.substring(lastSlashIndex + 1)
   }
 
   const opt = {
@@ -19,6 +28,7 @@ export default async (markdownCont, option) => {
     modifyImgSrc: true,
     imgSrcPrefix: '',
     hideTitle: false,
+    suppressLoadErrors: false,
   }
   if (option) Object.assign(opt, option)
 
@@ -26,47 +36,54 @@ export default async (markdownCont, option) => {
   if (markdownCont) frontmatter = parseFrontmatter(markdownCont)
   const { url, lid, lmd } = getFrontmatter(frontmatter, opt)
 
-  const imgExtReg = new RegExp('\\.(?:' + opt.checkImgExtensions.split(',').join('|') + ')$', 'i')
+  const imgExtReg = new RegExp('\\.(?:' + opt.checkImgExtensions.split(',').join('|') + ')(?=$|[?#])', 'i')
 
   const images = document.querySelectorAll('img')
   const setImagePromises = Array.from(images).map(async (img) => {
-    const srcRaw = img.getAttribute('src')
+    const srcRaw = img.getAttribute('src') || ''
+    const srcBase = stripQueryHash(srcRaw)
 
     const originalImage = new Image()
-    originalImage.setAttribute('src', srcRaw)
-    let src = srcRaw
+    let src = srcBase
+    let finalSrc = srcRaw
+    let loadSrc = srcRaw
 
     if (opt.modifyImgSrc) {
-      if (!/^https?:\/\//.test(srcRaw)) {
-        // Handle lid (local image directory) processing
+      if (!isHttpUrl(srcRaw) && !isProtocolRelativeUrl(srcRaw) && !isFileUrl(srcRaw)) {
         if (lid) {
-          // Remove lid prefix from src if it matches
-          const lidPattern = new RegExp('^(?:\\.\\/)?' + lid.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\//g, '\\/'))
+          const lidPattern = new RegExp('^(?:\\.\\/)?' + escapeForRegExp(lid).replace(/\//g, '\\/'))
           src = src.replace(lidPattern, '')
         }
 
         if (lmd) {
           let adjustedLmd = lmd.replace(/\\/g, '/')
           if (!/^file:\/\/\//.test(adjustedLmd)) adjustedLmd = 'file:///' + adjustedLmd
-          originalImage.setAttribute('src', adjustedLmd + src)
+          loadSrc = adjustedLmd + appendSuffix(src, srcRaw)
         }
 
-        // Only modify relative paths (not starting with '/'), absolute paths are kept as-is
         if (url && !src.startsWith('/')) {
           src = `${url}${src}`
         }
       }
-      // Normalize the final src to remove any relative path markers
       src = normalizeRelativePath(src)
-      img.setAttribute('src', src)
+      finalSrc = appendSuffix(src, srcRaw)
+      img.setAttribute('src', finalSrc)
     }
+
+    // Decide source used for size measurement
+    if (!opt.modifyImgSrc) {
+      finalSrc = appendSuffix(src, srcRaw)
+      loadSrc = finalSrc
+    } else if (!lmd) {
+      loadSrc = finalSrc
+    }
+    originalImage.setAttribute('src', loadSrc)
 
     const alt = img.alt
     if (alt) img.setAttribute('alt', alt)
     const title = img.title
-    
+
     if (opt.hideTitle) {
-      // Remove title attribute when hideTitle is enabled
       img.removeAttribute('title')
     } else if (title) {
       img.setAttribute('title', title)
@@ -79,7 +96,9 @@ export default async (markdownCont, option) => {
     img.removeAttribute('decoding')
     img.removeAttribute('loading')
 
-    if (imgExtReg.test(srcRaw)) {
+    const sizeSrc = img.getAttribute('src') || finalSrc
+
+    if (imgExtReg.test(sizeSrc)) {
       try {
         if (!originalImage.complete) {
           await new Promise((resolve) => {
@@ -88,12 +107,18 @@ export default async (markdownCont, option) => {
           })
         }
       } catch (error) {
-        console.error(`[renderer-image(dom)] ${src}`, error)
+        if (!opt.suppressLoadErrors) console.error(`[renderer-image(dom)] ${src}`, error)
       }
 
       if (originalImage.naturalWidth && originalImage.naturalHeight) {
-        const imgName = getImageName(src)
-        const { width, height } = setImgSize(imgName, { width: originalImage.naturalWidth, height: originalImage.naturalHeight }, opt.scaleSuffix, opt.resize, title)
+        const imgName = getImageName(sizeSrc)
+        const { width, height } = setImgSize(
+          imgName,
+          { width: originalImage.naturalWidth, height: originalImage.naturalHeight },
+          opt.scaleSuffix,
+          opt.resize,
+          title
+        )
 
         img.setAttribute('width', width)
         img.setAttribute('height', height)
