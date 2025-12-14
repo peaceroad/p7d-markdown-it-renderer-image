@@ -94,7 +94,7 @@ If you want to use resize functionality while hiding the title attribute from th
 
 ### Hiding title attribute
 
-By using `{hideTitle: true}`, removes the title attribute from img elements:
+By default, the title attribute is removed **only when** `resize` is enabled and the title matches the resize pattern. Set `{hideTitle: false}` to always keep title, or leave it on when you want resize hints without keeping the title attribute.
 
 ```js
 const md = mdit().use(mditRendererImage, {hideTitle: true});

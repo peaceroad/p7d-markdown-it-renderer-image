@@ -1,5 +1,5 @@
 export default async (markdownCont, option) => {
-  const { setImgSize, parseFrontmatter, getFrontmatter, normalizeRelativePath } = await import('./img-util.js')
+  const { setImgSize, parseFrontmatter, getFrontmatter, normalizeRelativePath, resizeReg } = await import('./img-util.js')
 
   const isHttpUrl = (value) => /^https?:\/\//i.test(value)
   const isProtocolRelativeUrl = (value) => /^\/\//.test(value)
@@ -27,7 +27,7 @@ export default async (markdownCont, option) => {
     checkImgExtensions: 'png,jpg,jpeg,gif,webp',
     modifyImgSrc: true,
     imgSrcPrefix: '',
-    hideTitle: false,
+    hideTitle: true,
     suppressLoadErrors: false,
   }
   if (option) Object.assign(opt, option)
@@ -83,7 +83,8 @@ export default async (markdownCont, option) => {
     if (alt) img.setAttribute('alt', alt)
     const title = img.title
 
-    if (opt.hideTitle) {
+    const removeTitle = opt.hideTitle && opt.resize && title && resizeReg.test(title)
+    if (removeTitle) {
       img.removeAttribute('title')
     } else if (title) {
       img.setAttribute('title', title)

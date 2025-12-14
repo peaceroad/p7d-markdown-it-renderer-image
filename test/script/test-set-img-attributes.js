@@ -130,7 +130,7 @@ const testSetImageAttributes = async (images, options = {}, markdownContent = nu
     const setImageAttributes = (await import(scriptUrl)).default
     
     // Use legacy API: (markdownCont, option)
-    await setImageAttributes(markdownContent, options)
+    await setImageAttributes(markdownContent, { hideTitle: false, ...options })
     
     return images
   } finally {

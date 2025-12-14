@@ -1,7 +1,7 @@
 import path from 'path'
 import fetch from 'sync-fetch'
 import imageSize from 'image-size'
-import { setImgSize, getFrontmatter, normalizeRelativePath } from './script/img-util.js'
+import { setImgSize, getFrontmatter, normalizeRelativePath, resizeReg } from './script/img-util.js'
 
 const tokensState = new WeakMap()
 const globalFailedImgLoads = new Set()
@@ -114,7 +114,7 @@ const mditRendererImage = (md, option) => {
     checkImgExtensions: 'png,jpg,jpeg,gif,webp',
     modifyImgSrc: false,
     imgSrcPrefix: '',
-    hideTitle: false,
+    hideTitle: true,
     remoteTimeout: 5000,
     disableRemoteSize: false,
     cacheMax: 64,
@@ -198,11 +198,11 @@ const mditRendererImage = (md, option) => {
         globalMissingMdPathWarnings.add(srcRaw)
       }
 
-      const imgData = hasSrcPath
-        ? getImgData(
-            srcPath,
-            isRemote,
-            opt.remoteTimeout,
+    const imgData = hasSrcPath
+      ? getImgData(
+          srcPath,
+          isRemote,
+          opt.remoteTimeout,
             imgDataCache,
             opt.cacheMax,
             failedImgLoads,
@@ -223,9 +223,10 @@ const mditRendererImage = (md, option) => {
 
     token.attrSet('src', finalSrc)
     token.attrSet('alt', token.content || '')
-    if (titleRaw && !opt.hideTitle) {
+    const removeTitle = opt.hideTitle && opt.resize && titleRaw && resizeReg.test(titleRaw)
+    if (titleRaw && !removeTitle) {
       token.attrSet('title', titleRaw)
-    } else if (opt.hideTitle) {
+    } else if (removeTitle) {
       const titleIndex = token.attrIndex('title')
       if (titleIndex >= 0) token.attrs.splice(titleIndex, 1)
     }

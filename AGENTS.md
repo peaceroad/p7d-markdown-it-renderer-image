@@ -1,7 +1,7 @@
-# markdown-it-renderer-image – Workflow Notes
+# markdown-it-renderer-image  EWorkflow Notes
 
 ## index.js (markdown-it plugin, Node)
-1. Initialize options (remote sizing on, remoteTimeout 5000ms, remoteMaxBytes 16MB, cacheMax 64, suppressErrors none).
+1. Initialize options (remote sizing on, remoteTimeout 5000ms, remoteMaxBytes 16MB, cacheMax 64, suppressErrors none, hideTitle true).
 2. Prepare extension regex (query/hash ignored).
 3. For each `image` token:
    - Read `srcRaw`/`title`; split base + query/hash.
@@ -12,7 +12,7 @@
    - Apply `setImgSize` (scaleSuffix, resize via title) and set width/height.
 
 ## script/set-img-attributes.js (browser)
-1. Parse options (modifyImgSrc on by default, resize/scaleSuffix off, hideTitle false, suppressLoadErrors false).
+1. Parse options (modifyImgSrc on by default, resize/scaleSuffix off, hideTitle true, suppressLoadErrors false).
 2. Parse YAML frontmatter (if provided) for `url`/`lid`/`lmd`.
 3. For each DOM `img`:
    - Read `srcRaw`; compute base + query/hash.
@@ -28,3 +28,5 @@
 ## Testing
 - `npm test` for Node-side plugin + YAML frontmatter tests.
 - `npm run test:script` for browser-side DOM handling tests.
+
+

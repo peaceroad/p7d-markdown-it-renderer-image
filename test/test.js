@@ -10,44 +10,50 @@ if (isWindows) {
   __dirname = __dirname.replace(/^\/+/, '').replace(/\//g, '\\')
 }
 
-const commonOpt = { scaleSuffix: true, resize: true }
+const commonOpt = { scaleSuffix: true, resize: true, hideTitle: false }
 const md = mdit().use(mditRendererImage, commonOpt);
 //const mdLazy = mdit().use(mditRendererImage, {scaleSuffix: true, lazyLoad: true, asyncDecode: true});
 const mdLazy = mdit().use(mditRendererImage, { ...commonOpt, lazyLoad: true });
 const mdEnvPat = mdit().use(mditRendererImage, { ...commonOpt, mdPath: __dirname + '/examples.md' });
+const mdHideDefault = mdit().use(mditRendererImage, { scaleSuffix: true, resize: true });
 
-
-const example = __dirname + '/examples.txt';
-let mdPat = __dirname + '/examples.md';
-const exampleCont = fs.readFileSync(example, 'utf-8').trim();
-let ms = [];
-let ms0 = exampleCont.split(/\n*\[Markdown\]\n/);
-let n = 1;
-while(n < ms0.length) {
-  let mhs = ms0[n].split(/\n+\[HTML[^\]]*?\]\n/);
-  let i = 1;
-  while (i < mhs.length) {
-    if (mhs[i] === undefined) {
-      mhs[i] = '';
-    } else {
-      mhs[i] = mhs[i].replace(/$/,'\n');
+const loadExamples = (file) => {
+  const example = __dirname + '/' + file;
+  const exampleCont = fs.readFileSync(example, 'utf-8').trim();
+  let ms = [];
+  let ms0 = exampleCont.split(/\n*\[Markdown\]\n/);
+  let n = 1;
+  while(n < ms0.length) {
+    let mhs = ms0[n].split(/\n+\[HTML[^\]]*?\]\n/);
+    let i = 1;
+    while (i < mhs.length) {
+      if (mhs[i] === undefined) {
+        mhs[i] = '';
+      } else {
+        mhs[i] = mhs[i].replace(/$/,'\n');
+      }
+      i++;
     }
-    i++;
+    ms[n] = {
+      markdown: mhs[0],
+      html: mhs[1],
+      htmlLazy: mhs[2],
+    };
+    n++;
   }
-  ms[n] = {
-    markdown: mhs[0],
-    html: mhs[1],
-    htmlLazy: mhs[2],
-  };
-  n++;
+  return ms;
 }
+
+let mdPat = __dirname + '/examples.md';
+const ms = loadExamples('examples.txt');
+const msHide = loadExamples('examples-hideTitle-default.txt');
 
 let pass = true
 
 console.log('===========================================================')
 console.log('test.js - examples.txt')
 
-n = 1;
+let n = 1;
 
 const h0 = md.render(fs.readFileSync(__dirname + '/test.md', 'utf-8').trim(), {'mdPath': __dirname + '/test.md'});
 const c0 = '<p><img src="cat.jpg" alt="A cat" width="400" height="300"></p>\n';
@@ -103,3 +109,26 @@ while(n < ms.length) {
 }
 
 if (pass) console.log('\nAll tests passed')
+
+console.log('===========================================================')
+console.log('test.js - examples-hideTitle-default.txt')
+
+n = 1;
+while(n < msHide.length) {
+  console.log('Test (hideTitle default): ' + n + ' >>>');
+
+  const m = msHide[n].markdown;
+  const renderEnv = { mdPath: mdPat }
+  const h = mdHideDefault.render(m, renderEnv);
+  try {
+    assert.strictEqual(h, msHide[n].html);
+  } catch(e) {
+    pass = false
+    console.log('incorrect(hideTitle default): ');
+    console.log('H: ' + h +'C: ' + msHide[n].html);
+  };
+
+  n++;
+}
+
+if (pass) console.log('\nAll tests passed (including hideTitle default)')
