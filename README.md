@@ -56,7 +56,7 @@ This is identified by `imageFileName.match(/[@._-]([0-9]+)(x|dpi|ppi)$/)`
 
 ### Resizing layout image by title attribute
 
-Option to resize based on the value of the title attribute: `{resize: true}`
+Option to resize based on the value of the title attribute: `{resize: true}` (with `hideTitle` defaulting to `true`, titles that contain resize hints are removed unless you set `hideTitle: false`).
 
 ```js
 const md = mdit().use(mditRendererImage, {resize: true});
@@ -71,13 +71,18 @@ console.log(md.render('![A cat.](cat.jpg "サイズ変更：50%")', {mdPath: mdP
 // <p><img src="cat.jpg" alt="A cat." width="200" height="150"></p>
 
 console.log(md.render('![A cat.](cat.jpg "The photo taken by k_taka. The shown photo have been resized to 50%.")', {mdPath: mdPat}));
-// <p><img src="cat.jpg" alt="A cat." title="The photo taken by k_taka. The shown photo have been resized to 50%." width="200" height="150"></p>
+// <p><img src="cat.jpg" alt="A cat." width="200" height="150"></p>
 
 console.log(md.render('![Figure](cat.jpg "resize:320px")', {mdPath: mdPat}));
-// <p><img src="cat.jpg" alt="Figure" title="resize:320px" width="320" height="240"></p>
+// <p><img src="cat.jpg" alt="Figure" width="320" height="240"></p>
 
 console.log(md.render('![Figure](cat@2x.jpg "resize:320px"))', {mdPath: mdPat}));
-// <p><img src="cat@2x.jpg" alt="Figure" title="resize:320px" width="320" height="240"></p>
+// <p><img src="cat@2x.jpg" alt="Figure" width="320" height="240"></p>
+
+// Keep title with resize hints:
+const mdKeepTitle = mdit().use(mditRendererImage, { resize: true, hideTitle: false });
+console.log(mdKeepTitle.render('![Figure](cat.jpg "resize:320px")', {mdPath: mdPat}));
+// <p><img src="cat.jpg" alt="Figure" title="resize:320px" width="320" height="240"></p>
 ```
 
 This is identified by `imgTitle.match(/(?:(?:(?:大きさ|サイズ)の?変更|リサイズ|resize(?:d to)?) *[:：]? *([0-9]+)([%％]|px)|([0-9]+)([%％]|px)[にへ](?:(?:大きさ|サイズ)を?変更|リサイズ))/i)`
@@ -85,23 +90,6 @@ This is identified by `imgTitle.match(/(?:(?:(?:大きさ|サイズ)の?変更|�
 If `px` is specified, the numerical value is treated as the width after resizing.
 
 ---
-
-Notice: Other Markdown extended notations may specify a caption in the title attribute. Therefore, think carefully about whether to enable this option.
-
-If you want to use resize functionality while hiding the title attribute from the final HTML output, you can combine this with next `{hideTitle: true}` option.
-
----
-
-### Hiding title attribute
-
-By default, the title attribute is removed **only when** `resize` is enabled and the title matches the resize pattern. Set `{hideTitle: false}` to always keep title, or leave it on when you want resize hints without keeping the title attribute.
-
-```js
-const md = mdit().use(mditRendererImage, {hideTitle: true});
-
-console.log(md.render('![Alt text](image.jpg "resize: 50%")'));
-// <p><img src="image.jpg" alt="Alt text" width="200" height="150"></p>
-```
 
 ### Setting lazy load
 
