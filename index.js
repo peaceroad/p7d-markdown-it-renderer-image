@@ -115,6 +115,7 @@ const mditRendererImage = (md, option) => {
     modifyImgSrc: false,
     imgSrcPrefix: '',
     hideTitle: true,
+    resizeDataAttr: '',
     remoteTimeout: 5000,
     disableRemoteSize: false,
     cacheMax: 64,
@@ -227,6 +228,9 @@ const mditRendererImage = (md, option) => {
     if (titleRaw && !removeTitle) {
       token.attrSet('title', titleRaw)
     } else if (removeTitle) {
+      if (typeof opt.resizeDataAttr === 'string' && opt.resizeDataAttr.trim()) {
+        token.attrSet(opt.resizeDataAttr, titleRaw)
+      }
       const titleIndex = token.attrIndex('title')
       if (titleIndex >= 0) token.attrs.splice(titleIndex, 1)
     }

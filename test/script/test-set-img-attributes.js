@@ -403,4 +403,85 @@ Testing lid starting with ../`
   })
 })
 
+// Test 11: resize title removal preserves data attribute
+await runTest(11, 'Resize title removal preserves data attribute', async () => {
+  const images = [
+    new MockElement('img', { src: 'cat.jpg', alt: 'cat', title: 'resize:50%' })
+  ]
+  images[0].naturalWidth = 800
+  images[0].naturalHeight = 600
+
+  await testSetImageAttributes(images, {
+    resize: true,
+    hideTitle: true
+  })
+
+  const img = images[0]
+  assert.strictEqual(img.getAttribute('title'), '')
+  assert.strictEqual(img.getAttribute('data-img-resize'), 'resize:50%')
+  assert.strictEqual(img.getAttribute('width'), '400')
+  assert.strictEqual(img.getAttribute('height'), '300')
+})
+
+// Test 12: keep title clears data attribute
+await runTest(12, 'Keep title clears data attribute', async () => {
+  const images = [
+    new MockElement('img', { src: 'cat.jpg', alt: 'cat', title: 'resize:50%', 'data-img-resize': 'resize:25%' })
+  ]
+
+  await testSetImageAttributes(images, {
+    resize: true,
+    hideTitle: false
+  })
+
+  const img = images[0]
+  assert.strictEqual(img.getAttribute('title'), 'resize:50%')
+  assert.strictEqual(img.getAttribute('data-img-resize'), '')
+})
+
+// Test 13: non-resize title clears data attribute
+await runTest(13, 'Non-resize title clears data attribute', async () => {
+  const images = [
+    new MockElement('img', { src: 'cat.jpg', alt: 'cat', title: 'A caption', 'data-img-resize': 'resize:50%' })
+  ]
+
+  await testSetImageAttributes(images, {
+    resize: true,
+    hideTitle: true
+  })
+
+  const img = images[0]
+  assert.strictEqual(img.getAttribute('title'), 'A caption')
+  assert.strictEqual(img.getAttribute('data-img-resize'), '')
+})
+
+// Test 14: preserve query/hash when src is modified
+await runTest(14, 'Preserve query/hash on modified src', async () => {
+  const images = [
+    new MockElement('img', { src: './images/cat.jpg?ver=1#top', alt: 'cat' })
+  ]
+
+  const markdownWithYaml = `---
+lid: images/
+url: https://example.com/
+---`
+
+  await testSetImageAttributes(images, {}, markdownWithYaml)
+
+  const img = images[0]
+  assert.strictEqual(img.getAttribute('src'), 'https://example.com/cat.jpg?ver=1#top')
+})
+
+// Test 15: protocol-relative src should not be normalized
+await runTest(15, 'Protocol-relative src unchanged', async () => {
+  const images = [
+    new MockElement('img', { src: '//example.com/cat.jpg?x=1', alt: 'cat' })
+  ]
+
+  await testSetImageAttributes(images, {})
+
+  const img = images[0]
+  assert.strictEqual(img.getAttribute('src'), '//example.com/cat.jpg?x=1')
+})
+
 console.log('All tests passed')

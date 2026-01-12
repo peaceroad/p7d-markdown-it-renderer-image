@@ -90,6 +90,24 @@ This is identified by `imgTitle.match(/(?:(?:(?:大きさ|サイズ)の?変更|�
 If `px` is specified, the numerical value is treated as the width after resizing.
 
 ---
+#### Title removal and DOM reprocessing
+
+`hideTitle` defaults to `true`, so titles that contain resize hints are removed from the output HTML. This is fine for server-side rendering, but if you later run the browser DOM script on the same HTML (e.g., after DOM updates), the resize hint is no longer in `title`, so **title-based resize cannot be re-applied**. Scale suffix handling still works because it is filename-based, but percentage/px resize hints are lost once the title is removed.
+
+To avoid this, the browser DOM script stores the resize hint in a data attribute when it removes the title. The defaults are:
+
+- DOM script (`script/set-img-attributes.js`): `resizeDataAttr: 'data-img-resize'`
+- markdown-it plugin (`index.js`): `resizeDataAttr: ''` (no data attribute unless you opt in)
+
+You can:
+
+- Set `hideTitle: false` to keep the title.
+- Or keep `hideTitle: true` and let the hint be preserved in `data-img-resize` (DOM).
+- For the markdown-it plugin, set `resizeDataAttr: 'data-img-resize'` if you plan to reprocess with the DOM script.
+- Set `resizeDataAttr: ''` to disable adding the data attribute (DOM).
+
+When the DOM script keeps a title (either because `hideTitle: false` or the title is not a resize hint), it does not add `resizeDataAttr` and clears it if a non-resize title is present.
+
 
 ### Setting lazy load
 
@@ -143,6 +161,8 @@ When `{modifyImgSrc: true}`, the plugin will modify image src attributes based o
 ```js
 const md = mdit().use(mditRendererImage, {modifyImgSrc: true});
 ```
+
+Query/hash fragments are preserved when modifying `src`, and protocol-relative or absolute URLs are left intact.
 
 #### imgSrcPrefix
 
@@ -228,7 +248,8 @@ await setImgAttributes(null, {
   resize: true,
   lazyLoad: true,
   asyncDecode: true,
-  hideTitle: true
+  hideTitle: true,
+  resizeDataAttr: 'data-img-resize'
 })
 </script>
 ```
@@ -252,7 +273,8 @@ txt.addEventListener('input', async () => {
       asyncDecode: false,
       modifyImgSrc: true,
       imgSrcPrefix: 'https://example.com/images/',
-      hideTitle: true
+      hideTitle: true,
+      resizeDataAttr: 'data-img-resize'
     })
   } catch (error) {
     console.error('Error setting image attributes:', error)

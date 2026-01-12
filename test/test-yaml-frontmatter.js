@@ -130,3 +130,4 @@ pass = runTest(mdMetaWithImgSrcPrefix, testData.withImgSrcPrefix, pass)
 pass = runTest(mdMetaWithLidRelative, testData.withLidRelative, pass)
 
 if (pass) console.log('All tests passed')
+if (!pass) process.exitCode = 1

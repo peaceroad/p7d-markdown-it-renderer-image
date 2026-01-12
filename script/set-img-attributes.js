@@ -5,9 +5,7 @@ export default async (markdownCont, option) => {
   const isProtocolRelativeUrl = (value) => /^\/\//.test(value)
   const isFileUrl = (value) => /^file:\/\//i.test(value)
   const stripQueryHash = (value) => value.split(/[?#]/)[0]
-  const appendSuffix = (base, raw) => base + raw.slice(base.length)
   const escapeForRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-
   const getImageName = (imgSrc) => {
     const cleanSrc = stripQueryHash(imgSrc)
     const lastDotIndex = cleanSrc.lastIndexOf('.')
@@ -28,13 +26,25 @@ export default async (markdownCont, option) => {
     modifyImgSrc: true,
     imgSrcPrefix: '',
     hideTitle: true,
+    resizeDataAttr: 'data-img-resize',
     suppressLoadErrors: false,
   }
   if (option) Object.assign(opt, option)
+  const resizeDataAttr = typeof opt.resizeDataAttr === 'string' && opt.resizeDataAttr.trim()
+    ? opt.resizeDataAttr
+    : ''
 
   let frontmatter = {}
   if (markdownCont) frontmatter = parseFrontmatter(markdownCont)
   const { url, lid, lmd } = getFrontmatter(frontmatter, opt)
+  const lidPattern = lid
+    ? new RegExp('^(?:\\.\\/)?' + escapeForRegExp(lid).replace(/\//g, '\\/'))
+    : null
+  let adjustedLmd = ''
+  if (lmd) {
+    adjustedLmd = lmd.replace(/\\/g, '/')
+    if (!/^file:\/\/\//.test(adjustedLmd)) adjustedLmd = 'file:///' + adjustedLmd
+  }
 
   const imgExtReg = new RegExp('\\.(?:' + opt.checkImgExtensions.split(',').join('|') + ')(?=$|[?#])', 'i')
 
@@ -42,52 +52,61 @@ export default async (markdownCont, option) => {
   const setImagePromises = Array.from(images).map(async (img) => {
     const srcRaw = img.getAttribute('src') || ''
     const srcBase = stripQueryHash(srcRaw)
+    const srcSuffix = srcRaw.slice(srcBase.length)
+    const isLocalSrc = !isHttpUrl(srcRaw) && !isProtocolRelativeUrl(srcRaw) && !isFileUrl(srcRaw)
 
-    const originalImage = new Image()
     let src = srcBase
     let finalSrc = srcRaw
     let loadSrc = srcRaw
 
     if (opt.modifyImgSrc) {
-      if (!isHttpUrl(srcRaw) && !isProtocolRelativeUrl(srcRaw) && !isFileUrl(srcRaw)) {
-        if (lid) {
-          const lidPattern = new RegExp('^(?:\\.\\/)?' + escapeForRegExp(lid).replace(/\//g, '\\/'))
-          src = src.replace(lidPattern, '')
-        }
+      if (isLocalSrc) {
+        if (lidPattern) src = src.replace(lidPattern, '')
 
-        if (lmd) {
-          let adjustedLmd = lmd.replace(/\\/g, '/')
-          if (!/^file:\/\/\//.test(adjustedLmd)) adjustedLmd = 'file:///' + adjustedLmd
-          loadSrc = adjustedLmd + appendSuffix(src, srcRaw)
-        }
+        const localNormalized = normalizeRelativePath(src)
+        if (adjustedLmd) loadSrc = adjustedLmd + localNormalized + srcSuffix
 
         if (url && !src.startsWith('/')) {
           src = `${url}${src}`
         }
+        src = normalizeRelativePath(src)
       }
-      src = normalizeRelativePath(src)
-      finalSrc = appendSuffix(src, srcRaw)
+      finalSrc = src + srcSuffix
       img.setAttribute('src', finalSrc)
     }
 
     // Decide source used for size measurement
     if (!opt.modifyImgSrc) {
-      finalSrc = appendSuffix(src, srcRaw)
+      finalSrc = src + srcSuffix
       loadSrc = finalSrc
-    } else if (!lmd) {
+    } else if (!adjustedLmd || !isLocalSrc) {
       loadSrc = finalSrc
     }
-    originalImage.setAttribute('src', loadSrc)
 
     const alt = img.alt
     if (alt) img.setAttribute('alt', alt)
-    const title = img.title
+    const titleAttr = img.getAttribute('title') || ''
+    const storedTitle = resizeDataAttr ? (img.getAttribute(resizeDataAttr) || '') : ''
+    const titleHasResizeHint = !!(titleAttr && resizeReg.test(titleAttr))
+    const storedHasResizeHint = !!(storedTitle && resizeReg.test(storedTitle))
+    const resizeTitle = titleHasResizeHint
+      ? titleAttr
+      : (!titleAttr && storedHasResizeHint ? storedTitle : '')
+    const hasResizeHint = opt.resize && !!resizeTitle
 
-    const removeTitle = opt.hideTitle && opt.resize && title && resizeReg.test(title)
+    const removeTitle = opt.hideTitle && hasResizeHint
     if (removeTitle) {
+      if (resizeDataAttr && resizeTitle) img.setAttribute(resizeDataAttr, resizeTitle)
       img.removeAttribute('title')
-    } else if (title) {
-      img.setAttribute('title', title)
+    } else if (titleAttr) {
+      img.setAttribute('title', titleAttr)
+    }
+    if (resizeDataAttr && !removeTitle) {
+      if (titleAttr) {
+        img.removeAttribute(resizeDataAttr)
+      } else if (storedTitle && !storedHasResizeHint) {
+        img.removeAttribute(resizeDataAttr)
+      }
     }
 
     let decoding = img.getAttribute('decoding')
@@ -100,6 +119,8 @@ export default async (markdownCont, option) => {
     const sizeSrc = img.getAttribute('src') || finalSrc
 
     if (imgExtReg.test(sizeSrc)) {
+      const originalImage = new Image()
+      originalImage.setAttribute('src', loadSrc)
       try {
         if (!originalImage.complete) {
           await new Promise((resolve) => {
@@ -118,7 +139,7 @@ export default async (markdownCont, option) => {
           { width: originalImage.naturalWidth, height: originalImage.naturalHeight },
           opt.scaleSuffix,
           opt.resize,
-          title
+          resizeTitle
         )
 
         img.setAttribute('width', width)

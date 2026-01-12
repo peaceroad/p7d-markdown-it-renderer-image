@@ -16,6 +16,7 @@ const md = mdit().use(mditRendererImage, commonOpt);
 const mdLazy = mdit().use(mditRendererImage, { ...commonOpt, lazyLoad: true });
 const mdEnvPat = mdit().use(mditRendererImage, { ...commonOpt, mdPath: __dirname + '/examples.md' });
 const mdHideDefault = mdit().use(mditRendererImage, { scaleSuffix: true, resize: true });
+const mdResizeDataAttr = mdit().use(mditRendererImage, { resize: true, resizeDataAttr: 'data-img-resize' });
 
 const loadExamples = (file) => {
   const example = __dirname + '/' + file;
@@ -63,6 +64,16 @@ try {
   pass = false
   console.log('incorrect(0): ');
   console.log('H: ' + h0 +'C: ' + c0);
+};
+
+const hResizeDataAttr = mdResizeDataAttr.render('![Figure](cat.jpg "resize:50%")', {'mdPath': mdPat});
+const cResizeDataAttr = '<p><img src="cat.jpg" alt="Figure" width="200" height="150" data-img-resize="resize:50%"></p>\n';
+try {
+  assert.strictEqual(hResizeDataAttr, cResizeDataAttr);
+} catch(e) {
+  pass = false
+  console.log('incorrect(resizeDataAttr): ');
+  console.log('H: ' + hResizeDataAttr +'C: ' + cResizeDataAttr);
 };
 
 while(n < ms.length) {
@@ -132,3 +143,4 @@ while(n < msHide.length) {
 }
 
 if (pass) console.log('\nAll tests passed (including hideTitle default)')
+if (!pass) process.exitCode = 1
