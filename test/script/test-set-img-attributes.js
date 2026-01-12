@@ -64,23 +64,32 @@ class MockImage extends MockElement {
 }
 
 // Lightweight document mock
-const createMockDocument = (images) => {
+const createMockDocument = (images, metaTag = null) => {
   return {
     querySelectorAll: (selector) => {
       if (selector === 'img') {
         return images
       }
       return []
+    },
+    querySelector: (selector) => {
+      if (selector === 'meta[name="markdown-frontmatter"]') {
+        return metaTag
+      }
+      return null
     }
   }
 }
 
 // Helper function to test setImageAttributes in mock environment
-const testSetImageAttributes = async (images, options = {}, markdownContent = null) => {
+const testSetImageAttributes = async (images, options = {}, markdownContent = null, metaContent = null) => {
   // Mock global document and Image
   const originalDocument = global.document
   const originalImage = global.Image
-  global.document = createMockDocument(images)
+  const metaTag = metaContent
+    ? new MockElement('meta', { name: 'markdown-frontmatter', content: metaContent })
+    : null
+  global.document = createMockDocument(images, metaTag)
   
   // Create dynamic MockImage that returns naturalWidth/Height from the image element
   global.Image = class DynamicMockImage extends MockElement {
@@ -482,6 +491,46 @@ await runTest(15, 'Protocol-relative src unchanged', async () => {
 
   const img = images[0]
   assert.strictEqual(img.getAttribute('src'), '//example.com/cat.jpg?x=1')
+})
+
+// Test 16: readMeta applies rendererImage options
+await runTest(16, 'readMeta applies rendererImage options', async () => {
+  const images = [
+    new MockElement('img', { src: 'cat.jpg', alt: 'cat' })
+  ]
+  const metaContent = JSON.stringify({
+    _extensionSettings: {
+      rendererImage: {
+        lazyLoad: true,
+        asyncDecode: true
+      }
+    }
+  })
+
+  await testSetImageAttributes(images, { readMeta: true }, null, metaContent)
+
+  const img = images[0]
+  assert.strictEqual(img.getAttribute('loading'), 'lazy')
+  assert.strictEqual(img.getAttribute('decoding'), 'async')
+})
+
+// Test 17: readMeta skip flags prevent processing
+await runTest(17, 'readMeta skip flags prevent processing', async () => {
+  const images = [
+    new MockElement('img', { src: 'cat.jpg', alt: 'cat' })
+  ]
+  const metaContent = JSON.stringify({
+    _extensionSettings: {
+      notSetImageElementAttributes: true
+    }
+  })
+
+  await testSetImageAttributes(images, { readMeta: true, lazyLoad: true }, null, metaContent)
+
+  const img = images[0]
+  assert.strictEqual(img.getAttribute('loading'), '')
+  assert.strictEqual(img.getAttribute('width'), '')
+  assert.strictEqual(img.getAttribute('height'), '')
 })
 
 console.log('All tests passed')

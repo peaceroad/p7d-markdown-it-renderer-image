@@ -12,8 +12,8 @@
    - Apply `setImgSize` (scaleSuffix, resize via title) and set width/height.
 
 ## script/set-img-attributes.js (browser)
-1. Parse options (modifyImgSrc on by default, resize/scaleSuffix off, hideTitle true, resizeDataAttr defaults to `data-img-resize`, suppressLoadErrors false).
-2. Parse YAML frontmatter (if provided) for `url`/`lid`/`lmd`.
+1. Parse options (modifyImgSrc on by default, resize/scaleSuffix off, hideTitle true, resizeDataAttr defaults to `data-img-resize`, suppressLoadErrors false, readMeta/observe off by default).
+2. Parse YAML frontmatter (if provided) for `url`/`lid`/`lmd`. When `readMeta: true`, read `meta[name="markdown-frontmatter"]` and apply `_extensionSettings.rendererImage` plus frontmatter keys (skip if `notSetImageElementAttributes` or `disableRendererImage` is true).
 3. For each DOM `img`:
    - Read `srcRaw`; compute base + query/hash.
    - If `modifyImgSrc`: strip `lid`; build `loadSrc` from `lmd` + normalized local path (before `url`); prepend `url` for final `src` when relative, normalize; keep query/hash; set final `src` on the element.
@@ -21,6 +21,7 @@
    - Choose loadSrc: `lmd`-prefixed path if provided, else final `src`; load into an Image.
    - On load, if extension matches, use naturalWidth/Height with `setImgSize` (scaleSuffix, resize via title) to set width/height. Extension match ignores query/hash.
    - `suppressLoadErrors` silences image load errors. Use this file in browsers; `index.js` is Node-oriented.
+4. When `observe: true`, uses MutationObserver to re-run processing on DOM and meta changes (live previews).
 
 ## Utilities (script/img-util.js)
 - Frontmatter parsing, path normalization, resize/scaleSuffix regexes, and size adjustment (`setImgSize`).

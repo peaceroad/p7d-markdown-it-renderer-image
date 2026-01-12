@@ -282,6 +282,25 @@ txt.addEventListener('input', async () => {
 })
 ```
 
+### Live preview (readMeta / observe)
+
+For live editing environments, you can opt in to reading frontmatter from a meta tag and watching DOM changes. If your environment injects `<meta name="markdown-frontmatter" content='...'>` (for example, VS Code preview), you can read it and re-run on DOM changes.
+
+- `readMeta: true` reads `<meta name="markdown-frontmatter" content="...">` when present. The content should be JSON. If `_extensionSettings.rendererImage` is set, those options are applied unless you passed the same option explicitly. If `_extensionSettings.notSetImageElementAttributes` or `_extensionSettings.disableRendererImage` is `true`, processing is skipped.
+- `observe: true` enables a `MutationObserver` that reprocesses images when `img` or the frontmatter meta changes.
+
+Example:
+
+```html
+<meta name="markdown-frontmatter" content='{"_extensionSettings":{"rendererImage":{"lazyLoad":true}}}'>
+<script type="module">
+import setImgAttributes from '<package-directory>/script/set-img-attributes.js'
+await setImgAttributes(null, { readMeta: true, observe: true })
+</script>
+```
+
+Note: VS Code `previewScripts` does not load ESM directly. If you want to use the DOM script there, provide an IIFE/UMD build (e.g., via a bundler) and reference that instead.
+
 ## Testing
 
 Run tests to verify functionality:
