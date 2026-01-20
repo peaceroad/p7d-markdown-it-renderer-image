@@ -38,6 +38,37 @@ let mdMetaWithLidRelative = mdit().use(mditMeta).use(mditRendererImage, {
   mdPath: __dirname + path.sep + 'examples-yaml-frontmatter-with-lidRelative.md',
 })
 
+let mdFrontmatter = mdit().use(mditRendererImage, {
+  modifyImgSrc: true,
+  disableRemoteSize: true,
+  suppressErrors: 'local',
+  mdPath: __dirname + path.sep + 'examples-yaml-frontmatter.md',
+})
+
+let mdOptionBase = mdit().use(mditRendererImage, {
+  modifyImgSrc: true,
+  disableRemoteSize: true,
+  suppressErrors: 'local',
+  urlImageBase: 'https://image.example.com/assets/',
+  mdPath: __dirname + path.sep + 'examples-yaml-frontmatter.md',
+})
+
+let mdProtocolRelative = mdit().use(mditRendererImage, {
+  modifyImgSrc: true,
+  disableRemoteSize: true,
+  suppressErrors: 'local',
+  outputUrlMode: 'protocol-relative',
+  mdPath: __dirname + path.sep + 'examples-yaml-frontmatter.md',
+})
+
+let mdPathOnly = mdit().use(mditRendererImage, {
+  modifyImgSrc: true,
+  disableRemoteSize: true,
+  suppressErrors: 'local',
+  outputUrlMode: 'path-only',
+  mdPath: __dirname + path.sep + 'examples-yaml-frontmatter.md',
+})
+
 const testData = {
   noOption: __dirname + path.sep +  'examples-yaml-frontmatter.txt',
   withImgSrcPrefix: __dirname + path.sep + 'examples-yaml-frontmatter-with-imgSrcPrefix.txt',
@@ -128,6 +159,105 @@ let pass = true
 pass = runTest(mdMeta, testData.noOption, pass)
 pass = runTest(mdMetaWithImgSrcPrefix, testData.withImgSrcPrefix, pass)
 pass = runTest(mdMetaWithLidRelative, testData.withLidRelative, pass)
+
+console.log('===========================================================')
+console.log('test-yaml-frontmatter.js - urlimage/urlimagebase')
+try {
+  const envUrlImage = {
+    frontmatter: {
+      url: 'https://example.com/page',
+      urlimage: 'https://image.example.com/assets/',
+    },
+  }
+  const hUrlImage = mdFrontmatter.render('![Alt](images/cat.jpg)', envUrlImage)
+  assert.strictEqual(hUrlImage, '<p><img src="https://image.example.com/assets/images/cat.jpg" alt="Alt"></p>\n')
+
+  const envUrlImageBase = {
+    frontmatter: {
+      url: 'https://example.com/page',
+      urlimagebase: 'https://image.example.com/assets/',
+      urlimage: '2025',
+    },
+  }
+  const hUrlImageBase = mdFrontmatter.render('![Alt](foo/bar/cat.jpg)', envUrlImageBase)
+  assert.strictEqual(hUrlImageBase, '<p><img src="https://image.example.com/assets/page/2025/cat.jpg" alt="Alt"></p>\n')
+
+  const envUrlImageBaseAlias = {
+    frontmatter: {
+      url: 'https://example.com/page',
+      urlImageBase: 'https://image.example.com/assets/',
+    },
+  }
+  const hUrlImageBaseAlias = mdFrontmatter.render('![Alt](cat.jpg)', envUrlImageBaseAlias)
+  assert.strictEqual(hUrlImageBaseAlias, '<p><img src="https://image.example.com/assets/page/cat.jpg" alt="Alt" width="400" height="300"></p>\n')
+
+  const envUrlImageAlias = {
+    frontmatter: {
+      url: 'https://example.com/page',
+      urlImage: 'https://image.example.com/assets/',
+    },
+  }
+  const hUrlImageAlias = mdFrontmatter.render('![Alt](cat.jpg)', envUrlImageAlias)
+  assert.strictEqual(hUrlImageAlias, '<p><img src="https://image.example.com/assets/cat.jpg" alt="Alt" width="400" height="300"></p>\n')
+
+  const envUrlImageBaseHtml = {
+    frontmatter: {
+      url: 'https://example.com/page/index.html',
+      urlimagebase: 'https://image.example.com/assets/',
+    },
+  }
+  const hUrlImageBaseHtml = mdFrontmatter.render('![Alt](cat.jpg)', envUrlImageBaseHtml)
+  assert.strictEqual(hUrlImageBaseHtml, '<p><img src="https://image.example.com/assets/page/cat.jpg" alt="Alt" width="400" height="300"></p>\n')
+
+  const envUrlImageBaseDotDir = {
+    frontmatter: {
+      url: 'https://example.com/v1.2/',
+      urlimagebase: 'https://image.example.com/assets/',
+    },
+  }
+  const hUrlImageBaseDotDir = mdFrontmatter.render('![Alt](cat.jpg)', envUrlImageBaseDotDir)
+  assert.strictEqual(hUrlImageBaseDotDir, '<p><img src="https://image.example.com/assets/v1.2/cat.jpg" alt="Alt" width="400" height="300"></p>\n')
+
+  const envUrlImageRelative = {
+    frontmatter: {
+      url: 'https://example.com/page',
+      urlimage: '2025',
+    },
+  }
+  const hUrlImageRelative = mdFrontmatter.render('![Alt](foo/bar/cat.jpg)', envUrlImageRelative)
+  assert.strictEqual(hUrlImageRelative, '<p><img src="https://example.com/page/2025/cat.jpg" alt="Alt"></p>\n')
+
+  const envUrlImageEmpty = {
+    frontmatter: {
+      url: 'https://example.com/page',
+      urlimagebase: 'https://image.example.com/assets/',
+      urlimage: '',
+    },
+  }
+  const hUrlImageEmpty = mdFrontmatter.render('![Alt](foo/bar/cat.jpg)', envUrlImageEmpty)
+  assert.strictEqual(hUrlImageEmpty, '<p><img src="https://image.example.com/assets/page/cat.jpg" alt="Alt"></p>\n')
+
+  const hOptionBase = mdOptionBase.render('![Alt](foo/bar/cat.jpg)')
+  assert.strictEqual(hOptionBase, '<p><img src="https://image.example.com/assets/foo/bar/cat.jpg" alt="Alt"></p>\n')
+
+  const hProtocolRelative = mdProtocolRelative.render('![Alt](cat.jpg)', envUrlImage)
+  assert.strictEqual(hProtocolRelative, '<p><img src="//image.example.com/assets/cat.jpg" alt="Alt" width="400" height="300"></p>\n')
+
+  const hPathOnly = mdPathOnly.render('![Alt](cat.jpg)', envUrlImage)
+  assert.strictEqual(hPathOnly, '<p><img src="/assets/cat.jpg" alt="Alt" width="400" height="300"></p>\n')
+
+  const envImageScale = {
+    frontmatter: {
+      imagescale: '50%',
+    },
+  }
+  const hImageScale = mdFrontmatter.render('![Alt](cat.jpg)', envImageScale)
+  assert.strictEqual(hImageScale, '<p><img src="cat.jpg" alt="Alt" width="200" height="150"></p>\n')
+} catch (e) {
+  pass = false
+  console.log('incorrect(urlimage/urlimagebase): ')
+  console.log(e.message)
+}
 
 if (pass) console.log('All tests passed')
 if (!pass) process.exitCode = 1

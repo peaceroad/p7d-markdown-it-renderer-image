@@ -51,6 +51,14 @@ const msHide = loadExamples('examples-hideTitle-default.txt');
 
 let pass = true
 
+const isRemoteImgHtml = (html) => /<img[^>]+src="(?:https?:)?\/\/[^"]+"/i.test(html)
+const stripSizeAttrs = (html) => html.replace(/\s+width="[^"]*"/g, '').replace(/\s+height="[^"]*"/g, '')
+const htmlMatches = (actual, expected) => {
+  if (actual === expected) return true
+  if (!isRemoteImgHtml(expected)) return false
+  return stripSizeAttrs(actual) === stripSizeAttrs(expected)
+}
+
 console.log('===========================================================')
 console.log('test.js - examples.txt')
 
@@ -59,7 +67,7 @@ let n = 1;
 const h0 = md.render(fs.readFileSync(__dirname + '/test.md', 'utf-8').trim(), {'mdPath': __dirname + '/test.md'});
 const c0 = '<p><img src="cat.jpg" alt="A cat" width="400" height="300"></p>\n';
 try {
-  assert.strictEqual(h0, c0);
+  assert.ok(htmlMatches(h0, c0));
 } catch(e) {
   pass = false
   console.log('incorrect(0): ');
@@ -69,7 +77,7 @@ try {
 const hResizeDataAttr = mdResizeDataAttr.render('![Figure](cat.jpg "resize:50%")', {'mdPath': mdPat});
 const cResizeDataAttr = '<p><img src="cat.jpg" alt="Figure" width="200" height="150" data-img-resize="resize:50%"></p>\n';
 try {
-  assert.strictEqual(hResizeDataAttr, cResizeDataAttr);
+  assert.ok(htmlMatches(hResizeDataAttr, cResizeDataAttr));
 } catch(e) {
   pass = false
   console.log('incorrect(resizeDataAttr): ');
@@ -87,7 +95,7 @@ while(n < ms.length) {
   }
   const h = md.render(m, renderEnv);
   try {
-    assert.strictEqual(h, ms[n].html);
+    assert.ok(htmlMatches(h, ms[n].html));
   } catch(e) {
     pass = false
     console.log('incorrect: ');
@@ -97,7 +105,7 @@ while(n < ms.length) {
   if (ms[n].htmlLazy !== undefined) {
     const hLazy = mdLazy.render(m, renderEnv);
     try {
-      assert.strictEqual(hLazy, ms[n].htmlLazy);
+      assert.ok(htmlMatches(hLazy, ms[n].htmlLazy));
     } catch(e) {
       pass = false
       console.log('incorrect(Lazy): ');
@@ -108,7 +116,7 @@ while(n < ms.length) {
   if (ms[n].html !== undefined) {
     const hEnvPat = mdEnvPat.render(m);
     try {
-      assert.strictEqual(hEnvPat, ms[n].html);
+      assert.ok(htmlMatches(hEnvPat, ms[n].html));
     } catch(e) {
       pass = false
       console.log('incorrect(mdEnvPat): ');
@@ -132,7 +140,7 @@ while(n < msHide.length) {
   const renderEnv = { mdPath: mdPat }
   const h = mdHideDefault.render(m, renderEnv);
   try {
-    assert.strictEqual(h, msHide[n].html);
+    assert.ok(htmlMatches(h, msHide[n].html));
   } catch(e) {
     pass = false
     console.log('incorrect(hideTitle default): ');

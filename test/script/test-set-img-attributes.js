@@ -82,7 +82,7 @@ const createMockDocument = (images, metaTag = null) => {
 }
 
 // Helper function to test setImageAttributes in mock environment
-const testSetImageAttributes = async (images, options = {}, markdownContent = null, metaContent = null) => {
+const testSetImageAttributes = async (images, options = {}, markdownContent = null, metaContent = null, captureLoadSrc = null) => {
   // Mock global document and Image
   const originalDocument = global.document
   const originalImage = global.Image
@@ -106,6 +106,7 @@ const testSetImageAttributes = async (images, options = {}, markdownContent = nu
     setAttribute(name, value) {
       super.setAttribute(name, value)
       if (name === 'src') {
+        if (typeof captureLoadSrc === 'function') captureLoadSrc(value)
         // Find the corresponding image element to get its dimensions
         const correspondingImg = images.find(img => img.getAttribute('src') === value)
         if (correspondingImg) {
@@ -531,6 +532,166 @@ await runTest(17, 'readMeta skip flags prevent processing', async () => {
   assert.strictEqual(img.getAttribute('loading'), '')
   assert.strictEqual(img.getAttribute('width'), '')
   assert.strictEqual(img.getAttribute('height'), '')
+})
+
+// Test 18: webview URI lmd should not be prefixed with file://
+await runTest(18, 'Webview URI lmd preserved', async () => {
+  const images = [
+    new MockElement('img', { src: 'cat.jpg', alt: 'cat' })
+  ]
+  const markdownWithYaml = `---
+lmd: https://file+.vscode-resource.vscode-cdn.net/abc/123
+---`
+
+  const loadSrcs = []
+  await testSetImageAttributes(images, {}, markdownWithYaml, null, (value) => loadSrcs.push(value))
+
+  const loadSrc = loadSrcs.find(value => value.includes('vscode-resource'))
+  assert.ok(loadSrc, 'Expected loadSrc for webview URI to be captured')
+  assert.ok(loadSrc.startsWith('https://file+.vscode-resource.vscode-cdn.net/abc/123/'), `Unexpected loadSrc: ${loadSrc}`)
+  assert.ok(!loadSrc.startsWith('file:///https://'), `Unexpected file URL prefix: ${loadSrc}`)
+})
+
+// Test 19: urlimagebase + urlimage (relative) uses basename
+await runTest(19, 'urlimagebase with urlimage relative uses basename', async () => {
+  const images = [
+    new MockElement('img', { src: 'foo/bar/cat.jpg', alt: 'cat' })
+  ]
+  const markdownWithYaml = `---
+url: https://example.com/page
+urlimagebase: https://image.example.com/assets/
+urlimage: 2025
+---`
+
+  await testSetImageAttributes(images, {}, markdownWithYaml)
+
+  const img = images[0]
+  assert.strictEqual(img.getAttribute('src'), 'https://image.example.com/assets/page/2025/cat.jpg')
+})
+
+// Test 20: urlimage empty keeps basename only
+await runTest(20, 'urlimage empty keeps basename only', async () => {
+  const images = [
+    new MockElement('img', { src: 'foo/bar/cat.jpg', alt: 'cat' })
+  ]
+  const markdownWithYaml = `---
+url: https://example.com/page
+urlimagebase: https://image.example.com/assets/
+urlimage:
+---`
+
+  await testSetImageAttributes(images, {}, markdownWithYaml)
+
+  const img = images[0]
+  assert.strictEqual(img.getAttribute('src'), 'https://image.example.com/assets/page/cat.jpg')
+})
+
+// Test 21: urlimage relative uses basename
+await runTest(21, 'urlimage relative uses basename', async () => {
+  const images = [
+    new MockElement('img', { src: 'foo/bar/cat.jpg', alt: 'cat' })
+  ]
+  const markdownWithYaml = `---
+url: https://example.com/page
+urlimage: 2025
+---`
+
+  await testSetImageAttributes(images, {}, markdownWithYaml)
+
+  const img = images[0]
+  assert.strictEqual(img.getAttribute('src'), 'https://example.com/page/2025/cat.jpg')
+})
+
+// Test 22: urlImageBase alias applies base with url path
+await runTest(22, 'urlImageBase alias applies base', async () => {
+  const images = [
+    new MockElement('img', { src: 'cat.jpg', alt: 'cat' })
+  ]
+  const markdownWithYaml = `---
+url: https://example.com/page
+urlImageBase: https://image.example.com/assets/
+---`
+
+  await testSetImageAttributes(images, {}, markdownWithYaml)
+
+  const img = images[0]
+  assert.strictEqual(img.getAttribute('src'), 'https://image.example.com/assets/page/cat.jpg')
+})
+
+// Test 23: urlImage alias applies base
+await runTest(23, 'urlImage alias applies base', async () => {
+  const images = [
+    new MockElement('img', { src: 'cat.jpg', alt: 'cat' })
+  ]
+  const markdownWithYaml = `---
+url: https://example.com/page
+urlImage: https://image.example.com/assets/
+---`
+
+  await testSetImageAttributes(images, {}, markdownWithYaml)
+
+  const img = images[0]
+  assert.strictEqual(img.getAttribute('src'), 'https://image.example.com/assets/cat.jpg')
+})
+
+// Test 24: outputUrlMode protocol-relative
+await runTest(24, 'outputUrlMode protocol-relative', async () => {
+  const images = [
+    new MockElement('img', { src: 'cat.jpg', alt: 'cat' })
+  ]
+  const markdownWithYaml = `---
+url: https://example.com/page
+urlimage: https://image.example.com/assets/
+---`
+
+  await testSetImageAttributes(images, { outputUrlMode: 'protocol-relative' }, markdownWithYaml)
+
+  const img = images[0]
+  assert.strictEqual(img.getAttribute('src'), '//image.example.com/assets/cat.jpg')
+})
+
+// Test 25: outputUrlMode path-only
+await runTest(25, 'outputUrlMode path-only', async () => {
+  const images = [
+    new MockElement('img', { src: 'cat.jpg', alt: 'cat' })
+  ]
+  const markdownWithYaml = `---
+url: https://example.com/page
+urlimage: https://image.example.com/assets/
+---`
+
+  await testSetImageAttributes(images, { outputUrlMode: 'path-only' }, markdownWithYaml)
+
+  const img = images[0]
+  assert.strictEqual(img.getAttribute('src'), '/assets/cat.jpg')
+})
+
+// Test 26: option urlImageBase without frontmatter
+await runTest(26, 'urlImageBase option without frontmatter', async () => {
+  const images = [
+    new MockElement('img', { src: 'foo/bar/cat.jpg', alt: 'cat' })
+  ]
+
+  await testSetImageAttributes(images, { urlImageBase: 'https://image.example.com/assets/' })
+
+  const img = images[0]
+  assert.strictEqual(img.getAttribute('src'), 'https://image.example.com/assets/foo/bar/cat.jpg')
+})
+
+// Test 27: imagescale applies global scaling
+await runTest(27, 'imagescale applies global scaling', async () => {
+  const images = [
+    new MockElement('img', { src: 'cat.jpg', alt: 'cat' })
+  ]
+  const markdownWithYaml = `---
+imagescale: 50%
+---`
+
+  await testSetImageAttributes(images, {}, markdownWithYaml)
+
+  const img = images[0]
+  assert.strictEqual(img.getAttribute('width'), '400')
+  assert.strictEqual(img.getAttribute('height'), '300')
 })
 
 console.log('All tests passed')

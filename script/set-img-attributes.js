@@ -1,9 +1,11 @@
 export default async (markdownCont, option) => {
-  const { setImgSize, parseFrontmatter, getFrontmatter, normalizeRelativePath, resizeReg } = await import('./img-util.js')
+  const { setImgSize, parseFrontmatter, getFrontmatter, normalizeRelativePath, resolveImageBase, resizeReg } = await import('./img-util.js')
 
   const isHttpUrl = (value) => /^https?:\/\//i.test(value)
   const isProtocolRelativeUrl = (value) => /^\/\//.test(value)
   const isFileUrl = (value) => /^file:\/\//i.test(value)
+  const hasUrlScheme = (value) => /^[a-z][a-z0-9+.-]*:\/\//i.test(value)
+  const hasSpecialScheme = (value) => /^(data|blob|vscode-resource|vscode-webview-resource|vscode-file):/i.test(value)
   const stripQueryHash = (value) => value.split(/[?#]/)[0]
   const escapeForRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
   const getAttr = (element, name) => {
@@ -34,23 +36,58 @@ export default async (markdownCont, option) => {
     }
     return cleanSrc.substring(lastSlashIndex + 1)
   }
+  const getBasename = (imgSrc) => {
+    const cleanSrc = stripQueryHash(imgSrc || '')
+    const lastSlashIndex = Math.max(cleanSrc.lastIndexOf('/'), cleanSrc.lastIndexOf('\\'))
+    return cleanSrc.substring(lastSlashIndex + 1)
+  }
+  const applyOutputUrlMode = (value, mode) => {
+    if (!value || !mode || mode === 'absolute') return value
+    if (mode === 'protocol-relative') {
+      return value.replace(/^https?:\/\//i, '//')
+    }
+    if (mode === 'path-only') {
+      if (value.startsWith('//') || /^https?:\/\//i.test(value)) {
+        const target = value.startsWith('//') ? `https:${value}` : value
+        try {
+          const parsed = new URL(target)
+          return `${parsed.pathname}${parsed.search}${parsed.hash}`
+        } catch {
+          return value
+        }
+      }
+    }
+    return value
+  }
 
   const opt = {
-    scaleSuffix: false,
-    resize: false,
-    lazyLoad: false,
-    asyncDecode: false,
-    checkImgExtensions: 'png,jpg,jpeg,gif,webp',
-    modifyImgSrc: true,
-    imgSrcPrefix: '',
-    hideTitle: true,
-    resizeDataAttr: 'data-img-resize',
-    suppressLoadErrors: false,
-    readMeta: false,
-    observe: false,
+    scaleSuffix: false, // scale by @2x or dpi/ppi suffix
+    resize: false, // resize by title hint
+    lazyLoad: false, // add loading="lazy"
+    asyncDecode: false, // add decoding="async"
+    checkImgExtensions: 'png,jpg,jpeg,gif,webp', // size only these extensions
+    modifyImgSrc: true, // rewrite src using frontmatter
+    imgSrcPrefix: '', // replace origin of base URL
+    urlImageBase: '', // fallback base when frontmatter lacks urlimagebase
+    outputUrlMode: 'absolute', // absolute | protocol-relative | path-only
+    hideTitle: false, // legacy alias (use autoHideResizeTitle)
+    autoHideResizeTitle: true, // remove title when resize hint used
+    resizeDataAttr: 'data-img-resize', // store resize hint when title removed
+    suppressErrors: 'none', // 'none' | 'all' | 'local' | 'remote'
+    suppressLoadErrors: false, // legacy alias (use suppressErrors)
+    readMeta: false, // read meta[name="markdown-frontmatter"]
+    observe: false, // watch DOM changes
   }
   if (option) Object.assign(opt, option)
   const optionOverrides = new Set(option ? Object.keys(option) : [])
+  if (optionOverrides.has('hideTitle') && !optionOverrides.has('autoHideResizeTitle')) {
+    opt.autoHideResizeTitle = opt.hideTitle
+    optionOverrides.add('autoHideResizeTitle')
+  }
+  if (optionOverrides.has('suppressLoadErrors') && !optionOverrides.has('suppressErrors')) {
+    opt.suppressErrors = opt.suppressLoadErrors ? 'all' : 'none'
+    optionOverrides.add('suppressErrors')
+  }
 
   const readMetaFrontmatter = () => {
     if (!opt.readMeta) return null
@@ -90,8 +127,14 @@ export default async (markdownCont, option) => {
     setBool('asyncDecode', rendererSettings.asyncDecode)
     setBool('modifyImgSrc', rendererSettings.modifyImgSrc)
     setString('imgSrcPrefix', rendererSettings.imgSrcPrefix)
+    setString('urlImageBase', rendererSettings.urlImageBase)
+    setString('outputUrlMode', rendererSettings.outputUrlMode)
     setString('checkImgExtensions', rendererSettings.checkImgExtensions)
     setString('resizeDataAttr', rendererSettings.resizeDataAttr)
+    setString('suppressErrors', rendererSettings.suppressErrors)
+    if (!optionOverrides.has('suppressErrors') && typeof rendererSettings.suppressLoadErrors === 'boolean') {
+      targetOpt.suppressErrors = rendererSettings.suppressLoadErrors ? 'all' : 'none'
+    }
 
     if (!optionOverrides.has('scaleSuffix') && typeof rendererSettings.disableScaleSuffix === 'boolean') {
       targetOpt.scaleSuffix = !rendererSettings.disableScaleSuffix
@@ -103,11 +146,14 @@ export default async (markdownCont, option) => {
       targetOpt.lazyLoad = !rendererSettings.disableLazyLoad
     }
 
-    if (!optionOverrides.has('hideTitle') && typeof rendererSettings.hideTitle === 'boolean') {
-      targetOpt.hideTitle = rendererSettings.hideTitle
+    if (!optionOverrides.has('autoHideResizeTitle') && typeof rendererSettings.autoHideResizeTitle === 'boolean') {
+      targetOpt.autoHideResizeTitle = rendererSettings.autoHideResizeTitle
     }
-    if (!optionOverrides.has('hideTitle') && typeof rendererSettings.keepTitle === 'boolean') {
-      targetOpt.hideTitle = !rendererSettings.keepTitle
+    if (!optionOverrides.has('autoHideResizeTitle') && typeof rendererSettings.hideTitle === 'boolean') {
+      targetOpt.autoHideResizeTitle = rendererSettings.hideTitle
+    }
+    if (!optionOverrides.has('autoHideResizeTitle') && typeof rendererSettings.keepTitle === 'boolean') {
+      targetOpt.autoHideResizeTitle = !rendererSettings.keepTitle
     }
   }
 
@@ -137,15 +183,28 @@ export default async (markdownCont, option) => {
       }
     }
 
+    if (!['none', 'all', 'local', 'remote'].includes(currentOpt.suppressErrors)) {
+      console.warn(`[renderer-image(dom)] Invalid suppressErrors value: ${currentOpt.suppressErrors}. Using 'none'.`)
+      currentOpt.suppressErrors = 'none'
+    }
+
     const resolvedFrontmatter = getFrontmatter(frontmatter, currentOpt) || {}
-    const { url, lid, lmd } = resolvedFrontmatter
+    const { url, urlimage, urlimagebase, lid, lmd, imageDir, hasImageDir, imageScale } = resolvedFrontmatter
+    const imageBase = resolveImageBase({
+      url,
+      urlimage,
+      urlimagebase: urlimagebase || currentOpt.urlImageBase,
+    }, currentOpt)
     const lidPattern = lid
       ? new RegExp('^(?:\\.\\/)?' + escapeForRegExp(lid).replace(/\//g, '\\/'))
       : null
     let adjustedLmd = ''
     if (lmd) {
       adjustedLmd = lmd.replace(/\\/g, '/')
-      if (!/^file:\/\/\//.test(adjustedLmd)) adjustedLmd = 'file:///' + adjustedLmd
+      if (!isProtocolRelativeUrl(adjustedLmd) && !isFileUrl(adjustedLmd) && !hasUrlScheme(adjustedLmd) && !hasSpecialScheme(adjustedLmd)) {
+        adjustedLmd = 'file:///' + adjustedLmd.replace(/^\/+/, '')
+      }
+      if (adjustedLmd && !adjustedLmd.endsWith('/')) adjustedLmd += '/'
     }
     const resizeDataAttr = typeof currentOpt.resizeDataAttr === 'string' && currentOpt.resizeDataAttr.trim()
       ? currentOpt.resizeDataAttr
@@ -154,11 +213,14 @@ export default async (markdownCont, option) => {
 
     return {
       opt: currentOpt,
-      url,
+      imageBase,
       lidPattern,
       adjustedLmd,
       imgExtReg,
       resizeDataAttr,
+      imageDir,
+      hasImageDir,
+      imageScale,
     }
   }
 
@@ -168,7 +230,7 @@ export default async (markdownCont, option) => {
     const context = buildContext()
     if (context.skip) return []
 
-    const { opt: currentOpt, url, lidPattern, adjustedLmd, imgExtReg, resizeDataAttr } = context
+    const { opt: currentOpt, imageBase, lidPattern, adjustedLmd, imgExtReg, resizeDataAttr, imageDir, hasImageDir, imageScale } = context
     const images = targetImages ? Array.from(targetImages) : Array.from(document.querySelectorAll('img'))
     if (images.length === 0) return []
     const setImagePromises = images.map(async (img) => {
@@ -189,18 +251,23 @@ export default async (markdownCont, option) => {
           const localNormalized = normalizeRelativePath(src)
           if (adjustedLmd) loadSrc = adjustedLmd + localNormalized + srcSuffix
 
-          if (url && !src.startsWith('/')) {
-            src = `${url}${src}`
+          let nextSrc = localNormalized
+          if (imageBase && !localNormalized.startsWith('/')) {
+            if (hasImageDir) {
+              nextSrc = getBasename(nextSrc)
+              if (imageDir) nextSrc = `${imageDir}${nextSrc}`
+            }
+            nextSrc = `${imageBase}${nextSrc}`
           }
-          src = normalizeRelativePath(src)
+          src = normalizeRelativePath(nextSrc)
         }
-        finalSrc = src + srcSuffix
+        finalSrc = applyOutputUrlMode(src + srcSuffix, currentOpt.outputUrlMode)
         setAttrIfChanged(img, 'src', finalSrc)
       }
 
       // Decide source used for size measurement
       if (!currentOpt.modifyImgSrc) {
-        finalSrc = src + srcSuffix
+        finalSrc = applyOutputUrlMode(src + srcSuffix, currentOpt.outputUrlMode)
         loadSrc = finalSrc
       } else if (!adjustedLmd || !isLocalSrc) {
         loadSrc = finalSrc
@@ -217,7 +284,7 @@ export default async (markdownCont, option) => {
         : (!titleAttr && storedHasResizeHint ? storedTitle : '')
       const hasResizeHint = currentOpt.resize && !!resizeTitle
 
-      const removeTitle = currentOpt.hideTitle && hasResizeHint
+      const removeTitle = currentOpt.autoHideResizeTitle && hasResizeHint
       if (removeTitle) {
         if (resizeDataAttr && resizeTitle) setAttrIfChanged(img, resizeDataAttr, resizeTitle)
         removeAttrIfPresent(img, 'title')
@@ -250,16 +317,28 @@ export default async (markdownCont, option) => {
 
       if (imgExtReg.test(sizeSrc)) {
         const originalImage = new Image()
+        const isRemoteForError = isHttpUrl(loadSrc) || isProtocolRelativeUrl(loadSrc)
+        const suppressByType = currentOpt.suppressErrors === 'all'
+          || (currentOpt.suppressErrors === 'local' && !isRemoteForError)
+          || (currentOpt.suppressErrors === 'remote' && isRemoteForError)
+        const suppressLoadErrors = currentOpt.suppressLoadErrors || suppressByType
         originalImage.setAttribute('src', loadSrc)
         try {
+          let loadError = false
           if (!originalImage.complete) {
             await new Promise((resolve) => {
               originalImage.onload = resolve
-              originalImage.onerror = resolve
+              originalImage.onerror = () => {
+                loadError = true
+                resolve()
+              }
             })
           }
+          if (loadError && !suppressLoadErrors) {
+            console.error(`[renderer-image(dom)] Can't load image: ${loadSrc}`)
+          }
         } catch (error) {
-          if (!currentOpt.suppressLoadErrors) console.error(`[renderer-image(dom)] ${src}`, error)
+          if (!suppressLoadErrors) console.error(`[renderer-image(dom)] ${src}`, error)
         }
 
         if (originalImage.naturalWidth && originalImage.naturalHeight) {
@@ -269,7 +348,8 @@ export default async (markdownCont, option) => {
             { width: originalImage.naturalWidth, height: originalImage.naturalHeight },
             currentOpt.scaleSuffix,
             currentOpt.resize,
-            resizeTitle
+            resizeTitle,
+            imageScale
           )
 
           setAttrIfChanged(img, 'width', width)

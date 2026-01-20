@@ -1,309 +1,298 @@
 # p7d-markdown-it-renderer-image
 
-A markdown-it plugin. This adds width and height attributes to img elements.
+A markdown-it plugin plus a browser DOM helper to set `img` attributes (width/height, loading, decoding) and optionally rewrite `src` using frontmatter.
 
 ## Use
 
-```js
-import fs from 'fs'
-import mdit from 'markdown-it'
-import mditRendererImage from '@peaceroad/markdown-it-renderer-image'
-const md = mdit().use(mditRendererImage);
-
-const mdPat = '/tmp/markdown.md';
-const mdCont = fs.readFileSync(mdPat, 'utf-8');
-// ![The cat is sitting nearby.](cat.jpg "The photo taken by k_taka.")
-
-console.log(md.render(mdCont, {mdPath: mdPat}));
-// If /tmp/cat.jpg is exists:
-// <p><img src="cat.jpg" alt="The cat is sitting nearby." title="The photo taken by k_taka." width="400" height="300"></p>
-```
-
-Or,
+### Node usage (markdown-it)
 
 ```js
 import fs from 'fs'
 import mdit from 'markdown-it'
 import mditRendererImage from '@peaceroad/markdown-it-renderer-image'
-const mdPat = '/tmp/markdown.md';
-const md = mdit().use(mditRendererImage, {mdPath: mdPat});
-const mdCont = fs.readFileSync(mdPat, 'utf-8');
 
-console.log(md.render(mdCont));
+const mdFile = '/tmp/markdown.md'
+const md = mdit().use(mditRendererImage, { mdPath: mdFile })
+const mdCont = fs.readFileSync(mdFile, 'utf-8')
+
+console.log(md.render(mdCont))
 ```
 
-## Option
-
-### Setting dpi by filename scale suffix
-
-You can adjust the height and width attributes by using the option `{scaleSuffix: true}`.
+You can also pass `mdPath` via the render env:
 
 ```js
-const md = mdit().use(mditRendererImage, {scaleSuffix: true});
+import fs from 'fs'
+import mdit from 'markdown-it'
+import mditRendererImage from '@peaceroad/markdown-it-renderer-image'
 
-console.log(md.render('![A cat.](cat@2x.jpg)', {mdPath: mdPat}));
-// <p><img src="cat@2x.jpg" alt="A cat." width="200" height="150"></p>
+const mdFile = '/tmp/markdown.md'
+const md = mdit().use(mditRendererImage)
+const mdCont = fs.readFileSync(mdFile, 'utf-8')
 
-console.log(md.render('![A cat.](cat_300dpi.jpg)', {mdPath: mdPat}));
-// <p><img src="cat_300dpi.jpg" alt="A cat." width="128" height="96"></p>
-
-console.log(md.render('![A cat.](cat_300ppi.jpg)', {mdPath: mdPat}));
-// <p><img src="cat_300ppi.jpg" alt="A cat." width="128" height="96"></p>
+console.log(md.render(mdCont, { mdPath: mdFile }))
 ```
 
-This is identified by `imageFileName.match(/[@._-]([0-9]+)(x|dpi|ppi)$/)`
-
-
-### Resizing layout image by title attribute
-
-Option to resize based on the value of the title attribute: `{resize: true}` (with `hideTitle` defaulting to `true`, titles that contain resize hints are removed unless you set `hideTitle: false`).
+Frontmatter-based rewriting on Node:
 
 ```js
-const md = mdit().use(mditRendererImage, {resize: true});
+import fs from 'fs'
+import mdit from 'markdown-it'
+import mditRendererImage from '@peaceroad/markdown-it-renderer-image'
 
-console.log(md.render('![A cat.](cat.jpg "Resize:50%")', {mdPath: mdPat}));
-// <p><img src="cat.jpg" alt="A cat." width="200" height="150"></p>
+const mdFile = '/tmp/markdown.md'
+const md = mdit().use(mditRendererImage)
+const mdCont = fs.readFileSync(mdFile, 'utf-8')
 
-console.log(md.render('![A cat.](cat.jpg "リサイズ：50%")', {mdPath: mdPat}));
-// <p><img src="cat.jpg" alt="A cat." width="200" height="150"></p>
-
-console.log(md.render('![A cat.](cat.jpg "サイズ変更：50%")', {mdPath: mdPat}));
-// <p><img src="cat.jpg" alt="A cat." width="200" height="150"></p>
-
-console.log(md.render('![A cat.](cat.jpg "The photo taken by k_taka. The shown photo have been resized to 50%.")', {mdPath: mdPat}));
-// <p><img src="cat.jpg" alt="A cat." width="200" height="150"></p>
-
-console.log(md.render('![Figure](cat.jpg "resize:320px")', {mdPath: mdPat}));
-// <p><img src="cat.jpg" alt="Figure" width="320" height="240"></p>
-
-console.log(md.render('![Figure](cat@2x.jpg "resize:320px"))', {mdPath: mdPat}));
-// <p><img src="cat@2x.jpg" alt="Figure" width="320" height="240"></p>
-
-// Keep title with resize hints:
-const mdKeepTitle = mdit().use(mditRendererImage, { resize: true, hideTitle: false });
-console.log(mdKeepTitle.render('![Figure](cat.jpg "resize:320px")', {mdPath: mdPat}));
-// <p><img src="cat.jpg" alt="Figure" title="resize:320px" width="320" height="240"></p>
+const frontmatter = { url: 'https://example.com/page' }
+const html = md.render(mdCont, { mdPath: mdFile, frontmatter })
+console.log(html)
 ```
 
-This is identified by `imgTitle.match(/(?:(?:(?:大きさ|サイズ)の?変更|リサイズ|resize(?:d to)?) *[:：]? *([0-9]+)([%％]|px)|([0-9]+)([%％]|px)[にへ](?:(?:大きさ|サイズ)を?変更|リサイズ))/i)`
-
-If `px` is specified, the numerical value is treated as the width after resizing.
-
----
-#### Title removal and DOM reprocessing
-
-`hideTitle` defaults to `true`, so titles that contain resize hints are removed from the output HTML. This is fine for server-side rendering, but if you later run the browser DOM script on the same HTML (e.g., after DOM updates), the resize hint is no longer in `title`, so **title-based resize cannot be re-applied**. Scale suffix handling still works because it is filename-based, but percentage/px resize hints are lost once the title is removed.
-
-To avoid this, the browser DOM script stores the resize hint in a data attribute when it removes the title. The defaults are:
-
-- DOM script (`script/set-img-attributes.js`): `resizeDataAttr: 'data-img-resize'`
-- markdown-it plugin (`index.js`): `resizeDataAttr: ''` (no data attribute unless you opt in)
-
-You can:
-
-- Set `hideTitle: false` to keep the title.
-- Or keep `hideTitle: true` and let the hint be preserved in `data-img-resize` (DOM).
-- For the markdown-it plugin, set `resizeDataAttr: 'data-img-resize'` if you plan to reprocess with the DOM script.
-- Set `resizeDataAttr: ''` to disable adding the data attribute (DOM).
-
-When the DOM script keeps a title (either because `hideTitle: false` or the title is not a resize hint), it does not add `resizeDataAttr` and clears it if a non-resize title is present.
-
-
-### Setting lazy load
-
-By using `{lazyLoad: true}`, it can have `loading="lazy"` attribute.
-
-```js
-const md = mdit().use(mditRendererImage, {lazyLoad: true});
-
-console.log(md.render('![A cat.](cat.jpg)', {mdPath: mdPat}));
-// <p><img src="cat.jpg" alt="A cat." loading="lazy" width="400" height="300"></p>
-```
-
-### Setting async decode
-
-By using `{asyncDecode: true}`, it can have `decoding="async"` attribute.
-
-```js
-const md = mdit().use(mditRendererImage, {asyncDecode: true});
-
-console.log(md.render('![A cat.](cat.jpg)', {mdPath: mdPat}));
-// <p><img src="cat.jpg" alt="A cat." decoding="async" width="400" height="300"></p>
-```
-
-### Check image extension
-
-By default, the image (extension) that specifies the width and height is limited to png, jpg, jpeg, gif, and webp. If you want to include other formats (for example svg), set `{checkImgExtensions: 'png,jpg,jpeg,gif,webp,svg' }`. Extensions are matched before query/hash, so `image.jpg?ver=1` is handled.
-
-### Remote image sizing
-
-Remote images are fetched synchronously to read dimensions (blocks until fetch completes). This is **enabled by default**; disable it explicitly if you do not want remote fetch during render:
-
-```js
-const md = mdit().use(mditRendererImage, {
-  disableRemoteSize: true, // opt out of remote fetch
-  remoteTimeout: 3000,      // ms timeout for remote fetch (default: 5000)
-  remoteMaxBytes: 16 * 1024 * 1024, // skip remote images larger than this when content-length is present (default 16MB)
-  suppressErrors: 'remote', // 'none' | 'all' | 'local' | 'remote'
-})
-```
-
-Image dimension results are cached per render (`cacheMax`: default 64 entries). Set `cacheMax: 0` to disable caching.
-
-### Image source modification
-
-You can control how image sources are processed and modified:
-
-#### modifyImgSrc
-
-When `{modifyImgSrc: true}`, the plugin will modify image src attributes based on frontmatter metadata (lid, lmd, url). This is useful for converting local development paths to production URLs.
-
-```js
-const md = mdit().use(mditRendererImage, {modifyImgSrc: true});
-```
-
-Query/hash fragments are preserved when modifying `src`, and protocol-relative or absolute URLs are left intact.
-
-#### imgSrcPrefix
-
-Adds a prefix to image URLs when used with the `url` frontmatter option:
-
-```js
-const md = mdit().use(mditRendererImage, {
-  modifyImgSrc: true,
-  imgSrcPrefix: 'https://cdn.example.com/'
-});
-```
-
-
-### YAML Frontmatter Options
-
-When `modifyImgSrc: true` is enabled, you can use these frontmatter options to control image source modification:
-
-- **lid** (Local Image Directory): Replaces the directory path in image URLs relative to the markdown file's directory, useful for converting local development paths to production paths
-- **lmd** (Local Media Directory): Similar to `lid` but specifically for media files, uses absolute paths and provides more granular control over media file paths (used in DOM/browser environments only)
-- **url**: Sets a base URL prefix for images
-
-#### Local Development and VS Code Environment
-
-```yaml
----
-url: https://example.com/article/
-lid: images
----
-
-![Sample Image](./images/sample.jpg)
-
-<!-- // Result: <img src="https://example.com/article/sample.jpg" alt="Sample Image" width="400" height="300"> -->
-```
-
-#### Browser DOM Manipulation
-
-```yaml
----
-url: https://example.com/article/
-lmd: C:\Users\User\manuscript
----
-
-![Sample Image](sample.jpg)
-
-<!-- // Result: <img src="https://example.com/article/sample.jpg" alt="Sample Image" width="400" height="300"> -->
-```
-
-Or with file:// protocol:
-
-```yaml
----
-url: https://example.com/article/
-lmd: file:///C:/Users/User/manuscript
----
-
-![Sample Image](sample.jpg)
-
-<!-- // Result: <img src="https://example.com/article/sample.jpg" alt="Sample Image" width="400" height="300"> -->
-```
-
-## Browser Support
-
-This plugin consists of three main components:
-
-- `index.js`: The main markdown-it plugin for server-side rendering and image attribute processing
-- `script/img-util.js`: Utility functions for image processing (shared between server and browser)
-- `script/set-img-attributes.js`: Browser-side functionality for setting image attributes directly in the DOM
-
-## Browser Usage
-
-This script is designed for browser environments only (requires DOM access).
-
-### Direct ES6 Module Import
+### Browser / DOM usage
 
 ```html
 <script type="module">
-import setImgAttributes from '<package-directory>/script/set-img-attributes.js'
+import setImgAttributes from '<package>/script/set-img-attributes.js'
 
-// Set attributes for all existing images in the DOM
-// First parameter can be null when processing existing DOM images
-await setImgAttributes(null, {
-  scaleSuffix: true,
-  resize: true,
-  lazyLoad: true,
-  asyncDecode: true,
-  hideTitle: true,
-  resizeDataAttr: 'data-img-resize'
+await setImgAttributes(markdownCont, {
+  readMeta: true, // read frontmatter from <meta>
+  observe: true,  // watch DOM mutations
 })
 </script>
 ```
 
-### With Bundler (Webpack, etc.)
+`setImgAttributes` reads YAML frontmatter from the first argument (markdown text). Pass `null`/`''` if you want to skip YAML parsing and rely on `readMeta` (JSON stored in `meta[name="markdown-frontmatter"]`).
+
+Bundlers can import the same entry point. The DOM script relies on `./img-util.js`, so bundle it or make sure the import base URL resolves correctly.
+
+Example (bundler or app code that rerenders HTML):
 
 ```js
 import setImgAttributes from '@peaceroad/markdown-it-renderer-image/script/set-img-attributes.js'
 
-// Example usage in your application
 txt.addEventListener('input', async () => {
-  let markdownCont = txt.value
-  // ... render HTML with markdown-it ...
+  const markdownCont = txt.value
   html.innerHTML = renderedHtml
-  
-  try {
-    await setImgAttributes(markdownCont, {
-      scaleSuffix: true,
-      resize: true,
-      lazyLoad: true,
-      asyncDecode: false,
-      modifyImgSrc: true,
-      imgSrcPrefix: 'https://example.com/images/',
-      hideTitle: true,
-      resizeDataAttr: 'data-img-resize'
-    })
-  } catch (error) {
-    console.error('Error setting image attributes:', error)
-  }
+
+  await setImgAttributes(markdownCont, {
+    readMeta: true,
+    observe: true,
+  })
 })
 ```
 
-### Live preview (readMeta / observe)
+## Options (summary)
 
-For live editing environments, you can opt in to reading frontmatter from a meta tag and watching DOM changes. If your environment injects `<meta name="markdown-frontmatter" content='...'>` (for example, VS Code preview), you can read it and re-run on DOM changes.
+### Node plugin options (defaults)
 
-- `readMeta: true` reads `<meta name="markdown-frontmatter" content="...">` when present. The content should be JSON. If `_extensionSettings.rendererImage` is set, those options are applied unless you passed the same option explicitly. If `_extensionSettings.notSetImageElementAttributes` or `_extensionSettings.disableRendererImage` is `true`, processing is skipped.
-- `observe: true` enables a `MutationObserver` that reprocesses images when `img` or the frontmatter meta changes.
+- `scaleSuffix` (false): scale by `@2x`, `300dpi`, `300ppi` suffixes.
+- `resize` (false): resize by title hint.
+- `autoHideResizeTitle` (true): remove title when resize hint is used.
+- `resizeDataAttr` (`data-img-resize`): store resize hint when title is removed (set `''` to disable).
+- `lazyLoad` (false): add `loading="lazy"`.
+- `asyncDecode` (false): add `decoding="async"`.
+- `checkImgExtensions` (`png,jpg,jpeg,gif,webp`): extensions to size.
+- `modifyImgSrc` (true): enable frontmatter-based `src` rewriting (no-op without frontmatter or `urlImageBase`).
+- `mdPath` (empty): markdown file path for local sizing.
+- `disableRemoteSize` (false): skip remote sizing.
+- `remoteTimeout` (5000): sync fetch timeout in ms.
+- `remoteMaxBytes` (16MB): skip large remote images when content-length is present.
+- `cacheMax` (64): per-render cache size (0 disables cache).
+- `suppressErrors` (`none`): `none` | `all` | `local` | `remote`.
+- `urlImageBase` (empty): fallback base when frontmatter lacks `urlimagebase`.
+- `outputUrlMode` (`absolute`): `absolute` | `protocol-relative` | `path-only`.
+
+### DOM script options (defaults)
+
+Same as Node options except remote sizing options, plus:
+
+- `readMeta` (false): read `meta[name="markdown-frontmatter"]` (JSON).
+- `observe` (false): watch DOM mutations and re-run processing.
+
+`readMeta`/`observe` are opt-in to avoid extra DOM work in normal pages; enable them for live preview scenarios (e.g., VS Code).
+
+## Options (details)
+
+### Modify output image `src` attribute from frontmatter or options
+
+When `modifyImgSrc: true` (default), image `src` is rewritten using frontmatter keys.
+
+Frontmatter is used only when `modifyImgSrc: true`. If frontmatter (and `urlImageBase`) is missing, `src` is left untouched.
+
+Frontmatter keys:
+
+- `url`: page base URL.
+- `urlimage`: image base URL (absolute) or image directory (relative/empty). alias: `urlImage`.
+- `urlimagebase`: base URL used with the path from `url`. alias: `urlImageBase`.
+- `lid`: local image directory prefix to strip from relative `src` so the remaining subpath can be reused in the final URL.
+- `lmd`: local media directory for DOM size loading.
+- `imagescale`: scale factor applied to all images (e.g. `60%` or `0.6`). alias: `imageScale`.
+
+Base selection order:
+
+1) `urlimage` when it is absolute (has a domain or starts with `//`).
+2) `urlimagebase` (frontmatter) or `urlImageBase` (option) + path from `url`.
+3) `url`.
+
+If `urlimage` is relative (no domain), it becomes an image directory inserted between base and filename, and only the basename from `src` is used. Use `urlimage:` (empty) or `urlimage: .` to force basename-only without adding a directory.
+
+Examples:
+
+```yaml
+---
+url: https://example.com/page
+urlimage: images
+---
+![A cat.](cat.jpg)
+# -> https://example.com/page/images/cat.jpg (relative urlimage uses basename-only)
+```
+
+```yaml
+---
+urlimage: https://image.example.com/assets/
+---
+![A cat.](cat.jpg)
+# -> https://image.example.com/assets/cat.jpg
+```
+
+```yaml
+---
+url: https://example.com/page
+urlimagebase: https://image.example.com/assets/
+urlimage: images
+---
+![A cat.](cat.jpg)
+# -> https://image.example.com/assets/page/images/cat.jpg
+```
+
+`lid` removes only the matching prefix and keeps the remaining subpath:
+
+```yaml
+---
+lid: image
+---
+![](image/cat.jpg)         # -> cat.jpg
+![](image/chapter/cat.jpg) # -> chapter/cat.jpg
+```
+
+Example of a global scale factor:
+
+```yaml
+---
+imagescale: 60%
+---
+![](cat.jpg) # -> width/height scaled to 60%
+```
+
+`imagescale` is applied after `scaleSuffix` and title-based resize. Order:
+
+1) Read original size
+2) Apply `scaleSuffix` (e.g. `@2x`)
+3) Apply title resize (`resize: true`)
+4) Apply `imagescale` (global scale)
+
+Example: 400x300 image with `@2x`, title `resize:50%`, and `imagescale: 0.5`
+-> 400x300 -> 200x150 -> 100x75 -> 50x38
+
+#### Local sizing in DOM (`lmd`)
+
+In browsers, local file access is restricted. For local sizing in the DOM script, provide `lmd` (local markdown directory) as a path or a Webview URI:
+
+```yaml
+---
+lmd: C:\Users\User\Documents\manuscript
+---
+```
+
+In VS Code, pass a Webview URI (e.g., `asWebviewUri`) instead of a raw `file://` path.
+
+Only `.html`, `.htm`, `.xhtml` are treated as file names when deriving the path from `url` (used by `urlimagebase`).
+
+- `url: https://example.com/page` -> `/page/`
+- `url: https://example.com/page/index.html` -> `/page/`
+- `url: https://example.com/v1.2/` -> `/v1.2/`
+
+#### `outputUrlMode`
+
+Applied at the end:
+
+- `protocol-relative`: `https://a/b` -> `//a/b`
+- `path-only`: `https://a/b` -> `/b` (same-origin only)
+
+### Modify output width/height attributes from filename suffixes
+
+When `scaleSuffix: true`, scales dimensions by:
+
+- `@2x` (half size)
+- `_300dpi` / `_300ppi` (convert to 96dpi)
+
+This is identified by `imageFileName.match(/[@._-]([0-9]+)(x|dpi|ppi)$/)`
 
 Example:
 
-```html
-<meta name="markdown-frontmatter" content='{"_extensionSettings":{"rendererImage":{"lazyLoad":true}}}'>
-<script type="module">
-import setImgAttributes from '<package-directory>/script/set-img-attributes.js'
-await setImgAttributes(null, { readMeta: true, observe: true })
-</script>
+```js
+const md = mdit().use(mditRendererImage, { scaleSuffix: true })
+md.render('![A cat](cat@2x.jpg)', { mdPath: mdFile })
+// <img ... width="200" height="150"> //cat.jpg is 400px wide and 300px high.
 ```
 
-Note: VS Code `previewScripts` does not load ESM directly. If you want to use the DOM script there, provide an IIFE/UMD build (e.g., via a bundler) and reference that instead.
+### Modify output width/height attributes from title resize hints
+
+When `resize: true`, resizes dimensions by title patterns. Example:
+
+```js
+const md = mdit().use(mditRendererImage, { resize: true })
+
+md.render('![A cat](cat.jpg "Resize:50%")', { mdPath: mdPat })
+// <img ... width="200" height="150"> //cat.jpg is 400px wide and 300px high.
+```
+
+Title patterns include:
+
+- `Resize:50%`
+- `リサイズ：50%`
+- `サイズ変更：50%`
+
+This is identified by `imgTitle.match(/(?:(?:(?:大きさ|サイズ)の?変更|リサイズ|resize(?:d to)?) *[:：]? *([0-9]+)([%％]|px)|([0-9]+)([%％]|px)[にへ](?:(?:大きさ|サイズ)を?変更|リサイズ))/i)`
+
+When `autoHideResizeTitle: true` (default), titles with resize hints are removed (Node/DOM). Set `autoHideResizeTitle: false` to keep titles even when resize hints are used. Resize hints are preserved in `resizeDataAttr` by default (`data-img-resize`); set `resizeDataAttr: ''` to disable.
+
+Default behavior example (when `resize: true`):
+
+```js
+const md = mdit().use(mditRendererImage, { resize: true })
+
+md.render('![Figure](cat.jpg "resize:50%")', { mdPath: mdPat })
+// <img ... width="200" height="150" data-img-resize="resize:50%">
+```
+
+If you render HTML with the Node plugin and then run the DOM script, keep `resizeDataAttr: 'data-img-resize'` (default) so the resize hint survives title removal. If you do not need DOM reprocessing, set `resizeDataAttr: ''` to avoid extra attributes.
+
+### Advanced/legacy options
+
+- `hideTitle`: legacy alias for `autoHideResizeTitle` (internal; avoid new usage).
+- `imgSrcPrefix`: rewrites only the origin of the resolved base URL (advanced; avoid new usage). Example: base `https://example.com/assets/` + `imgSrcPrefix: https://cdn.example.com/` -> `https://cdn.example.com/assets/`.
+- `suppressLoadErrors`: legacy alias for `suppressErrors` (`true` -> `all`, `false` -> `none`).
+
+### Set `loading` and `decoding` attributes
+
+- `lazyLoad: true` -> `loading="lazy"`
+- `asyncDecode: true` -> `decoding="async"`
+
+### Check image extensions
+
+Only files matching `checkImgExtensions` are sized. Query/hash is ignored.
+
+## Remote images (Node)
+
+Remote sizing is synchronous. For extension hosts (e.g., VS Code), set `disableRemoteSize: true` and let the DOM script size remote images.
 
 ## Testing
 
-Run tests to verify functionality:
+- `npm test` (Node plugin + frontmatter tests)
+- `npm run test:script` (DOM script tests)
 
-- `npm test` - Run main plugin tests and YAML frontmatter tests
-- `npm run test:script` - Run browser script tests for DOM manipulation
+## VS Code / Webview notes
+
+- Webview blocks `file://`. Pass `lmd` as a Webview URI (`asWebviewUri`) if you need local sizing in the DOM.
+- The DOM script uses a dynamic import for `./img-util.js`; bundle it or ensure the base URL resolves correctly.
