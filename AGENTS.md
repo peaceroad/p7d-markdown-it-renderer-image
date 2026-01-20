@@ -10,7 +10,7 @@
    - Set final `src`/`alt`/`title` (title removed only when `autoHideResizeTitle` + `resize` + resize-pattern match). When removed, preserve the resize hint in `resizeDataAttr` (default `data-img-resize`, set `''` to disable). Optional `decoding`/`loading`.
    - If extension allowed: resolve path (remote vs local via mdPath), warn once when mdPath missing, skip remote if `disableRemoteSize`.
    - Load dimensions via `image-size` (local) or `sync-fetch` + `image-size` (remote); respect `remoteMaxBytes` when content-length is present. Per-render cache; global sets de-duplicate errors/warnings. `cacheMax` 0 disables cache.
-   - Apply `setImgSize` (scaleSuffix, resize via title, imagescale) and set width/height.
+   - Apply `setImgSize` (scaleSuffix, resize via title, imagescale, noUpscale always on) and set width/height.
 4. Frontmatter resolution and base URL are cached per render to avoid recompute.
 
 ## script/set-img-attributes.js (browser)
@@ -22,7 +22,7 @@
    - `lmd` handling: keep existing URL schemes (http/https/file/vscode-*/data/blob); otherwise treat `lmd` as a local path and prepend `file:///` and a trailing slash.
    - Set `alt`, `title` (or remove if autoHideResizeTitle and resize/title match); when removed, store the resize hint in `resizeDataAttr` for later DOM updates; when title is kept or non-resize, clear `resizeDataAttr`; apply `loading`/`decoding` defaults if absent.
    - Choose loadSrc: `lmd`-prefixed path if provided, else final `src`; load into an Image.
-   - On load, if extension matches, use naturalWidth/Height with `setImgSize` (scaleSuffix, resize via title, imagescale) to set width/height. Extension match ignores query/hash.
+   - On load, if extension matches, use naturalWidth/Height with `setImgSize` (scaleSuffix, resize via title, imagescale, noUpscale always on) to set width/height. Extension match ignores query/hash.
    - `suppressErrors` silences image load errors (legacy alias: `suppressLoadErrors`). Use this file in browsers; `index.js` is Node-oriented.
 4. When `observe: true`, uses MutationObserver to re-run processing on DOM and meta changes (live previews).
 

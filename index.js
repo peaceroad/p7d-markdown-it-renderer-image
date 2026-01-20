@@ -1,7 +1,7 @@
 import path from 'path'
 import fetch from 'sync-fetch'
 import imageSize from 'image-size'
-import { setImgSize, getFrontmatter, normalizeRelativePath, resolveImageBase, resizeReg } from './script/img-util.js'
+import { setImgSize, getFrontmatter, normalizeRelativePath, resolveImageBase, normalizeResizeValue } from './script/img-util.js'
 
 const tokensState = new WeakMap()
 const globalFailedImgLoads = new Set()
@@ -143,20 +143,25 @@ const mditRendererImage = (md, option) => {
     hideTitle: false, // legacy alias (use autoHideResizeTitle)
     autoHideResizeTitle: true, // remove title when resize hint used
     resizeDataAttr: 'data-img-resize', // store resize hint when title removed
+    noUpscale: true, // internal: prevent final size from exceeding original pixels
     remoteTimeout: 5000, // sync fetch timeout (ms)
     disableRemoteSize: false, // skip remote sizing
     cacheMax: 64, // per-render image data cache size
     suppressErrors: 'none', // 'none' | 'all' | 'local' | 'remote'
     remoteMaxBytes: 16 * 1024 * 1024, // skip large remote images (if content-length)
   }
-  if (option) Object.assign(opt, option)
-  if (option && Object.prototype.hasOwnProperty.call(option, 'hideTitle')
-    && !Object.prototype.hasOwnProperty.call(option, 'autoHideResizeTitle')) {
-    opt.autoHideResizeTitle = option.hideTitle
+  const safeOption = option && typeof option === 'object' ? { ...option } : null
+  if (safeOption && Object.prototype.hasOwnProperty.call(safeOption, 'noUpscale')) {
+    delete safeOption.noUpscale
   }
-  if (option && Object.prototype.hasOwnProperty.call(option, 'suppressLoadErrors')
-    && !Object.prototype.hasOwnProperty.call(option, 'suppressErrors')) {
-    opt.suppressErrors = option.suppressLoadErrors ? 'all' : 'none'
+  if (safeOption) Object.assign(opt, safeOption)
+  if (safeOption && Object.prototype.hasOwnProperty.call(safeOption, 'hideTitle')
+    && !Object.prototype.hasOwnProperty.call(safeOption, 'autoHideResizeTitle')) {
+    opt.autoHideResizeTitle = safeOption.hideTitle
+  }
+  if (safeOption && Object.prototype.hasOwnProperty.call(safeOption, 'suppressLoadErrors')
+    && !Object.prototype.hasOwnProperty.call(safeOption, 'suppressErrors')) {
+    opt.suppressErrors = safeOption.suppressLoadErrors ? 'all' : 'none'
   }
 
   if (!['none', 'all', 'local', 'remote'].includes(opt.suppressErrors)) {
@@ -276,7 +281,7 @@ const mditRendererImage = (md, option) => {
 
       if (imgData?.width !== undefined) {
         const imgName = path.basename(srcBase, path.extname(srcBase))
-        const { width, height } = setImgSize(imgName, imgData, opt.scaleSuffix, opt.resize, titleRaw, imageScale)
+        const { width, height } = setImgSize(imgName, imgData, opt.scaleSuffix, opt.resize, titleRaw, imageScale, opt.noUpscale)
         token.attrSet('width', width)
         token.attrSet('height', height)
       }
@@ -284,13 +289,13 @@ const mditRendererImage = (md, option) => {
 
     token.attrSet('src', finalSrc)
     token.attrSet('alt', token.content || '')
-    const hasResizeHint = opt.resize && titleRaw && resizeReg.test(titleRaw)
-    const removeTitle = opt.autoHideResizeTitle && hasResizeHint
+    const resizeValue = opt.resize ? normalizeResizeValue(titleRaw) : ''
+    const removeTitle = opt.autoHideResizeTitle && !!resizeValue
     if (titleRaw && !removeTitle) {
       token.attrSet('title', titleRaw)
     } else if (removeTitle) {
-      if (typeof opt.resizeDataAttr === 'string' && opt.resizeDataAttr.trim()) {
-        token.attrSet(opt.resizeDataAttr, titleRaw)
+      if (typeof opt.resizeDataAttr === 'string' && opt.resizeDataAttr.trim() && resizeValue) {
+        token.attrSet(opt.resizeDataAttr, resizeValue)
       }
       const titleIndex = token.attrIndex('title')
       if (titleIndex >= 0) token.attrs.splice(titleIndex, 1)

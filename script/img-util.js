@@ -1,5 +1,6 @@
 const scaleSuffixReg = /[@._-]([0-9]+)(x|dpi|ppi)$/
 const resizeReg = /(?:(?:(?:大きさ|サイズ)の?変更|リサイズ|resize(?:d to)?) *[:：]? *([0-9]+)([%％]|px)|([0-9]+)([%％]|px)[にへ](?:(?:大きさ|サイズ)を?変更|リサイズ))/i
+const resizeValueReg = /^([0-9]+(?:\.[0-9]+)?)(%|px)$/i
 const yamlReg = /^--- *\n([\s\S]*?)\n---/
 
 const stripQueryHash = (value) => value.split(/[?#]/)[0]
@@ -105,10 +106,40 @@ const parseFrontmatter = (markdownCont) => {
   return result
 }
 
+const normalizeResizeValue = (value) => {
+  if (!value) return ''
+  const text = String(value).trim()
+  if (!text) return ''
+  const match = text.match(resizeReg)
+  if (match) {
+    const resizeValue = match[1] || match[3]
+    const resizeUnit = match[2] || match[4]
+    if (!resizeValue || !resizeUnit) return ''
+    const normalizedUnit = resizeUnit === '％' ? '%' : resizeUnit.toLowerCase()
+    return `${resizeValue}${normalizedUnit}`
+  }
+  const directMatch = text.match(resizeValueReg)
+  if (directMatch) {
+    return `${directMatch[1]}${directMatch[2].toLowerCase()}`
+  }
+  return ''
+}
+
+const parseResizeValue = (value) => {
+  const normalized = normalizeResizeValue(value)
+  if (!normalized) return null
+  const match = normalized.match(resizeValueReg)
+  if (!match) return null
+  const numericValue = Number(match[1])
+  if (!Number.isFinite(numericValue)) return null
+  return { value: numericValue, unit: match[2], normalized }
+}
+
 const parseImageScale = (value) => {
   if (value === undefined || value === null) return null
   if (typeof value === 'number') {
-    return Number.isFinite(value) && value > 0 ? value : null
+    if (!Number.isFinite(value) || value <= 0) return null
+    return Math.min(value, 1)
   }
   const text = String(value).trim()
   if (!text) return null
@@ -116,17 +147,19 @@ const parseImageScale = (value) => {
   if (percentMatch) {
     const percentValue = Number(percentMatch[1])
     if (!Number.isFinite(percentValue) || percentValue <= 0) return null
-    return percentValue / 100
+    return Math.min(percentValue / 100, 1)
   }
   const numericValue = Number(text)
   if (!Number.isFinite(numericValue) || numericValue <= 0) return null
-  return numericValue
+  return Math.min(numericValue, 1)
 }
 
-const setImgSize = (imgName, imgData, scaleSuffix, resize, title, imageScale) => {
+const setImgSize = (imgName, imgData, scaleSuffix, resize, title, imageScale, noUpscale) => {
   if (!imgData) return {}
-  let w = imgData.width
-  let h = imgData.height
+  const originalWidth = imgData.width
+  const originalHeight = imgData.height
+  let w = originalWidth
+  let h = originalHeight
   if (scaleSuffix) {
     const rs = imgName.match(scaleSuffixReg)
     if (rs) {
@@ -141,30 +174,27 @@ const setImgSize = (imgName, imgData, scaleSuffix, resize, title, imageScale) =>
       }
     }
   }
-  if (title && resize) {
-    const hasResizeSetting = title.match(resizeReg)
-    if (hasResizeSetting) {
-      let resizeValue, resizeUnit
-      if (hasResizeSetting[1]) {
-        resizeValue = +hasResizeSetting[1]
-        resizeUnit = hasResizeSetting[2]
-      } else {
-        resizeValue = +hasResizeSetting[3]
-        resizeUnit = hasResizeSetting[4]
-      }
-      if (resizeUnit.match(/[%％]/)) {
-        h = Math.round(h * resizeValue / 100)
-        w = Math.round(w * resizeValue / 100)
-      }
-      if (resizeUnit.match(/px/)) {
-        h = Math.round(h * resizeValue / w)
-        w = Math.round(resizeValue)
-      }
+  const resizeInfo = resize && title ? parseResizeValue(title) : null
+  if (resizeInfo) {
+    if (resizeInfo.unit === '%') {
+      h = Math.round(h * resizeInfo.value / 100)
+      w = Math.round(w * resizeInfo.value / 100)
+    }
+    if (resizeInfo.unit === 'px') {
+      h = Math.round(h * resizeInfo.value / w)
+      w = Math.round(resizeInfo.value)
     }
   }
-  if (imageScale && Number.isFinite(imageScale)) {
+  if (!resizeInfo && imageScale && Number.isFinite(imageScale)) {
     w = Math.round(w * imageScale)
     h = Math.round(h * imageScale)
+  }
+  if (noUpscale && Number.isFinite(originalWidth) && Number.isFinite(originalHeight) && w > 0 && h > 0) {
+    const limitScale = Math.min(1, originalWidth / w, originalHeight / h)
+    if (limitScale < 1) {
+      w = Math.round(w * limitScale)
+      h = Math.round(h * limitScale)
+    }
   }
   return { width: w, height: h }
 }
@@ -240,7 +270,8 @@ const resolveImageBase = (frontmatter, opt) => {
 }
 
 export {
-  scaleSuffixReg, resizeReg,
+  scaleSuffixReg, resizeReg, resizeValueReg,
+  normalizeResizeValue,
   parseFrontmatter, setImgSize, getFrontmatter,
   normalizeRelativePath, resolveImageBase,
 }

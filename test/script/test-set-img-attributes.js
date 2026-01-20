@@ -428,7 +428,7 @@ await runTest(11, 'Resize title removal preserves data attribute', async () => {
 
   const img = images[0]
   assert.strictEqual(img.getAttribute('title'), '')
-  assert.strictEqual(img.getAttribute('data-img-resize'), 'resize:50%')
+  assert.strictEqual(img.getAttribute('data-img-resize'), '50%')
   assert.strictEqual(img.getAttribute('width'), '400')
   assert.strictEqual(img.getAttribute('height'), '300')
 })
@@ -436,7 +436,7 @@ await runTest(11, 'Resize title removal preserves data attribute', async () => {
 // Test 12: keep title clears data attribute
 await runTest(12, 'Keep title clears data attribute', async () => {
   const images = [
-    new MockElement('img', { src: 'cat.jpg', alt: 'cat', title: 'resize:50%', 'data-img-resize': 'resize:25%' })
+    new MockElement('img', { src: 'cat.jpg', alt: 'cat', title: 'resize:50%', 'data-img-resize': '25%' })
   ]
 
   await testSetImageAttributes(images, {
@@ -452,7 +452,7 @@ await runTest(12, 'Keep title clears data attribute', async () => {
 // Test 13: non-resize title clears data attribute
 await runTest(13, 'Non-resize title clears data attribute', async () => {
   const images = [
-    new MockElement('img', { src: 'cat.jpg', alt: 'cat', title: 'A caption', 'data-img-resize': 'resize:50%' })
+    new MockElement('img', { src: 'cat.jpg', alt: 'cat', title: 'A caption', 'data-img-resize': '50%' })
   ]
 
   await testSetImageAttributes(images, {
@@ -692,6 +692,35 @@ imagescale: 50%
   const img = images[0]
   assert.strictEqual(img.getAttribute('width'), '400')
   assert.strictEqual(img.getAttribute('height'), '300')
+})
+
+// Test 28: noUpscale caps global scaling
+await runTest(28, 'noUpscale caps resize scaling', async () => {
+  const images = [
+    new MockElement('img', { src: 'cat.jpg', alt: 'cat', title: 'resize:200%' })
+  ]
+
+  await testSetImageAttributes(images, { resize: true })
+
+  const img = images[0]
+  assert.strictEqual(img.getAttribute('width'), '800')
+  assert.strictEqual(img.getAttribute('height'), '600')
+})
+
+// Test 29: imagescale clamps above 100%
+await runTest(29, 'imagescale clamps above 100%', async () => {
+  const images = [
+    new MockElement('img', { src: 'cat.jpg', alt: 'cat' })
+  ]
+  const markdownWithYaml = `---
+imagescale: 200%
+---`
+
+  await testSetImageAttributes(images, {}, markdownWithYaml)
+
+  const img = images[0]
+  assert.strictEqual(img.getAttribute('width'), '800')
+  assert.strictEqual(img.getAttribute('height'), '600')
 })
 
 console.log('All tests passed')

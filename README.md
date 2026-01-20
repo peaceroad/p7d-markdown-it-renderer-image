@@ -126,7 +126,7 @@ Frontmatter keys:
 - `urlimagebase`: base URL used with the path from `url`. alias: `urlImageBase`.
 - `lid`: local image directory prefix to strip from relative `src` so the remaining subpath can be reused in the final URL.
 - `lmd`: local media directory for DOM size loading.
-- `imagescale`: scale factor applied to all images (e.g. `60%` or `0.6`). alias: `imageScale`.
+- `imagescale`: scale factor applied to all images (e.g. `60%` or `0.6`, values above 100% are capped). alias: `imageScale`.
 
 Base selection order:
 
@@ -184,15 +184,15 @@ imagescale: 60%
 ![](cat.jpg) # -> width/height scaled to 60%
 ```
 
-`imagescale` is applied after `scaleSuffix` and title-based resize. Order:
+`imagescale` is applied after `scaleSuffix` and only when no title resize hint is present (resize takes priority). Values above 100% are capped. Order:
 
 1) Read original size
 2) Apply `scaleSuffix` (e.g. `@2x`)
-3) Apply title resize (`resize: true`)
-4) Apply `imagescale` (global scale)
+3) Apply title resize (`resize: true`) if present
+4) Apply `imagescale` (global scale) only when step 3 is not used
 
 Example: 400x300 image with `@2x`, title `resize:50%`, and `imagescale: 0.5`
--> 400x300 -> 200x150 -> 100x75 -> 50x38
+-> 400x300 -> 200x150 -> 100x75 (imagescale skipped)
 
 #### Local sizing in DOM (`lmd`)
 
@@ -255,7 +255,9 @@ Title patterns include:
 
 This is identified by `imgTitle.match(/(?:(?:(?:大きさ|サイズ)の?変更|リサイズ|resize(?:d to)?) *[:：]? *([0-9]+)([%％]|px)|([0-9]+)([%％]|px)[にへ](?:(?:大きさ|サイズ)を?変更|リサイズ))/i)`
 
-When `autoHideResizeTitle: true` (default), titles with resize hints are removed (Node/DOM). Set `autoHideResizeTitle: false` to keep titles even when resize hints are used. Resize hints are preserved in `resizeDataAttr` by default (`data-img-resize`); set `resizeDataAttr: ''` to disable.
+For `px` values, the number is treated as the target width and height is scaled to preserve aspect ratio (e.g. 400x300 with `resize:200px` -> 200x150). The final size is capped at the original image dimensions (no upscaling).
+
+When `autoHideResizeTitle: true` (default), titles with resize hints are removed (Node/DOM). Set `autoHideResizeTitle: false` to keep titles even when resize hints are used. Resize hints are preserved in `resizeDataAttr` by default (`data-img-resize`) using normalized values like `50%` or `200px`; set `resizeDataAttr: ''` to disable.
 
 Default behavior example (when `resize: true`):
 
@@ -263,7 +265,7 @@ Default behavior example (when `resize: true`):
 const md = mdit().use(mditRendererImage, { resize: true })
 
 md.render('![Figure](cat.jpg "resize:50%")', { mdPath: mdPat })
-// <img ... width="200" height="150" data-img-resize="resize:50%">
+// <img ... width="200" height="150" data-img-resize="50%">
 ```
 
 If you render HTML with the Node plugin and then run the DOM script, keep `resizeDataAttr: 'data-img-resize'` (default) so the resize hint survives title removal. If you do not need DOM reprocessing, set `resizeDataAttr: ''` to avoid extra attributes.

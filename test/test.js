@@ -17,6 +17,7 @@ const mdLazy = mdit().use(mditRendererImage, { ...commonOpt, lazyLoad: true });
 const mdEnvPat = mdit().use(mditRendererImage, { ...commonOpt, mdPath: __dirname + '/examples.md' });
 const mdHideDefault = mdit().use(mditRendererImage, { scaleSuffix: true, resize: true });
 const mdResizeDataAttr = mdit().use(mditRendererImage, { resize: true, resizeDataAttr: 'data-img-resize' });
+const mdNoUpscale = mdit().use(mditRendererImage, { resize: true });
 
 const loadExamples = (file) => {
   const example = __dirname + '/' + file;
@@ -75,13 +76,23 @@ try {
 };
 
 const hResizeDataAttr = mdResizeDataAttr.render('![Figure](cat.jpg "resize:50%")', {'mdPath': mdPat});
-const cResizeDataAttr = '<p><img src="cat.jpg" alt="Figure" width="200" height="150" data-img-resize="resize:50%"></p>\n';
+const cResizeDataAttr = '<p><img src="cat.jpg" alt="Figure" width="200" height="150" data-img-resize="50%"></p>\n';
 try {
   assert.ok(htmlMatches(hResizeDataAttr, cResizeDataAttr));
 } catch(e) {
   pass = false
   console.log('incorrect(resizeDataAttr): ');
   console.log('H: ' + hResizeDataAttr +'C: ' + cResizeDataAttr);
+};
+
+const hNoUpscale = mdNoUpscale.render('![Figure](cat.jpg "resize:200%")', {'mdPath': mdPat});
+const cNoUpscale = '<p><img src="cat.jpg" alt="Figure" width="400" height="300" data-img-resize="200%"></p>\n';
+try {
+  assert.ok(htmlMatches(hNoUpscale, cNoUpscale));
+} catch(e) {
+  pass = false
+  console.log('incorrect(noUpscale): ');
+  console.log('H: ' + hNoUpscale +'C: ' + cNoUpscale);
 };
 
 while(n < ms.length) {

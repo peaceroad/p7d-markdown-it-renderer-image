@@ -253,6 +253,14 @@ try {
   }
   const hImageScale = mdFrontmatter.render('![Alt](cat.jpg)', envImageScale)
   assert.strictEqual(hImageScale, '<p><img src="cat.jpg" alt="Alt" width="200" height="150"></p>\n')
+
+  const envImageScaleClamp = {
+    frontmatter: {
+      imagescale: '200%',
+    },
+  }
+  const hImageScaleClamp = mdFrontmatter.render('![Alt](cat.jpg)', envImageScaleClamp)
+  assert.strictEqual(hImageScaleClamp, '<p><img src="cat.jpg" alt="Alt" width="400" height="300"></p>\n')
 } catch (e) {
   pass = false
   console.log('incorrect(urlimage/urlimagebase): ')

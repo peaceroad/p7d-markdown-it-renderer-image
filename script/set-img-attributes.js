@@ -1,5 +1,5 @@
 export default async (markdownCont, option) => {
-  const { setImgSize, parseFrontmatter, getFrontmatter, normalizeRelativePath, resolveImageBase, resizeReg } = await import('./img-util.js')
+  const { setImgSize, parseFrontmatter, getFrontmatter, normalizeRelativePath, resolveImageBase, normalizeResizeValue } = await import('./img-util.js')
 
   const isHttpUrl = (value) => /^https?:\/\//i.test(value)
   const isProtocolRelativeUrl = (value) => /^\/\//.test(value)
@@ -73,13 +73,18 @@ export default async (markdownCont, option) => {
     hideTitle: false, // legacy alias (use autoHideResizeTitle)
     autoHideResizeTitle: true, // remove title when resize hint used
     resizeDataAttr: 'data-img-resize', // store resize hint when title removed
+    noUpscale: true, // internal: prevent final size from exceeding original pixels
     suppressErrors: 'none', // 'none' | 'all' | 'local' | 'remote'
     suppressLoadErrors: false, // legacy alias (use suppressErrors)
     readMeta: false, // read meta[name="markdown-frontmatter"]
     observe: false, // watch DOM changes
   }
-  if (option) Object.assign(opt, option)
-  const optionOverrides = new Set(option ? Object.keys(option) : [])
+  const safeOption = option && typeof option === 'object' ? { ...option } : null
+  if (safeOption && Object.prototype.hasOwnProperty.call(safeOption, 'noUpscale')) {
+    delete safeOption.noUpscale
+  }
+  if (safeOption) Object.assign(opt, safeOption)
+  const optionOverrides = new Set(safeOption ? Object.keys(safeOption) : [])
   if (optionOverrides.has('hideTitle') && !optionOverrides.has('autoHideResizeTitle')) {
     opt.autoHideResizeTitle = opt.hideTitle
     optionOverrides.add('autoHideResizeTitle')
@@ -182,7 +187,6 @@ export default async (markdownCont, option) => {
         applyRendererOptions(currentOpt, extensionSettings.rendererImage)
       }
     }
-
     if (!['none', 'all', 'local', 'remote'].includes(currentOpt.suppressErrors)) {
       console.warn(`[renderer-image(dom)] Invalid suppressErrors value: ${currentOpt.suppressErrors}. Using 'none'.`)
       currentOpt.suppressErrors = 'none'
@@ -277,16 +281,14 @@ export default async (markdownCont, option) => {
       if (alt) setAttrIfChanged(img, 'alt', alt)
       const titleAttr = getAttr(img, 'title')
       const storedTitle = resizeDataAttr ? getAttr(img, resizeDataAttr) : ''
-      const titleHasResizeHint = !!(titleAttr && resizeReg.test(titleAttr))
-      const storedHasResizeHint = !!(storedTitle && resizeReg.test(storedTitle))
-      const resizeTitle = titleHasResizeHint
-        ? titleAttr
-        : (!titleAttr && storedHasResizeHint ? storedTitle : '')
-      const hasResizeHint = currentOpt.resize && !!resizeTitle
+      const titleResizeValue = currentOpt.resize ? normalizeResizeValue(titleAttr) : ''
+      const storedResizeValue = currentOpt.resize ? normalizeResizeValue(storedTitle) : ''
+      const resizeValue = titleResizeValue || (!titleAttr ? storedResizeValue : '')
+      const hasResizeHint = currentOpt.resize && !!resizeValue
 
-      const removeTitle = currentOpt.autoHideResizeTitle && hasResizeHint
+      const removeTitle = currentOpt.autoHideResizeTitle && !!titleResizeValue
       if (removeTitle) {
-        if (resizeDataAttr && resizeTitle) setAttrIfChanged(img, resizeDataAttr, resizeTitle)
+        if (resizeDataAttr && resizeValue) setAttrIfChanged(img, resizeDataAttr, resizeValue)
         removeAttrIfPresent(img, 'title')
       } else if (titleAttr) {
         setAttrIfChanged(img, 'title', titleAttr)
@@ -294,7 +296,7 @@ export default async (markdownCont, option) => {
       if (resizeDataAttr && !removeTitle) {
         if (titleAttr) {
           removeAttrIfPresent(img, resizeDataAttr)
-        } else if (storedTitle && !storedHasResizeHint) {
+        } else if (storedTitle && !storedResizeValue) {
           removeAttrIfPresent(img, resizeDataAttr)
         }
       }
@@ -348,8 +350,9 @@ export default async (markdownCont, option) => {
             { width: originalImage.naturalWidth, height: originalImage.naturalHeight },
             currentOpt.scaleSuffix,
             currentOpt.resize,
-            resizeTitle,
-            imageScale
+            resizeValue,
+            imageScale,
+            currentOpt.noUpscale
           )
 
           setAttrIfChanged(img, 'width', width)
