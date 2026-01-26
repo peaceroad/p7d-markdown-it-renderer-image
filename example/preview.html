@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>renderer-image preview</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        margin: 24px;
+        color: #1a1a1a;
+      }
+      h1 {
+        font-size: 20px;
+        margin: 0 0 8px;
+      }
+      p.note {
+        margin: 0 0 16px;
+        color: #555;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: minmax(240px, 1fr) minmax(240px, 1fr);
+        gap: 16px;
+      }
+      .panel {
+        border: 1px solid #ddd;
+        padding: 12px;
+        border-radius: 6px;
+        background: #fafafa;
+        min-height: 120px;
+      }
+      pre.panel {
+        white-space: pre-wrap;
+        word-break: break-word;
+        font-size: 12px;
+      }
+      textarea.panel {
+        width: 100%;
+        box-sizing: border-box;
+        resize: vertical;
+        font-family: Consolas, Menlo, monospace;
+        font-size: 12px;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+        display: block;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Markdown -> Preview (local src) -> Output HTML (final src)</h1>
+    <p class="note">
+      This page uses embedded Markdown, renders it, and shows local preview vs final HTML.
+      Open via file:// to allow local previews. If scripts or images do not load,
+      use a local server or allow file access in your browser.
+    </p>
+    <div class="grid">
+      <section>
+        <h2>Markdown (source)</h2>
+        <textarea id="markdown" class="panel" rows="12"></textarea>
+      </section>
+      <section>
+        <h2>Rendered HTML (source)</h2>
+        <pre id="rendered" class="panel"></pre>
+      </section>
+      <section>
+        <h2>Preview (local src)</h2>
+        <div id="preview" class="panel"></div>
+      </section>
+      <section>
+        <h2>Output HTML (final src)</h2>
+        <pre id="final" class="panel"></pre>
+      </section>
+    </div>
+    <script id="markdown-source" type="text/markdown">
+---
+lmd: {{LMD}}
+url: https://example.com/page
+urlimage: https://cdn.example.com/assets/
+---
+
+![Cat](cat.jpg "resize:50%")
+![Cat (no resize)](cat.jpg)
+    </script>
+    <script src="../node_modules/markdown-it/dist/markdown-it.min.js"></script>
+    <script type="module">
+      const markdownEl = document.getElementById('markdown')
+      const renderedEl = document.getElementById('rendered')
+      const previewRoot = document.getElementById('preview')
+      const finalEl = document.getElementById('final')
+
+      const sourceEl = document.getElementById('markdown-source')
+
+      const md = window.markdownit ? window.markdownit() : null
+      const renderMarkdown = (markdown) => {
+        if (md) return md.render(markdown)
+        const body = markdown.replace(/^---[\\s\\S]*?---\\s*/m, '')
+        const lines = body.split('\\n').filter(Boolean)
+        return lines.map((line) => {
+          const imgMatch = line.match(/!\\[([^\\]]*)\\]\\(([^)\\s]+)(?:\\s+\\"([^\\"]*)\\")?\\)/)
+          if (imgMatch) {
+            const alt = imgMatch[1]
+            const src = imgMatch[2]
+            const title = imgMatch[3]
+            const titleAttr = title ? \` title="\${title}"\` : ''
+            return \`<p><img src="\${src}" alt="\${alt}"\${titleAttr}></p>\`
+          }
+          return \`<p>\${line}</p>\`
+        }).join('\\n')
+      }
+
+      const lmd = new URL('./', window.location.href).href
+      let setImgAttributes = null
+      try {
+        const mod = await import('../script/set-img-attributes.js')
+        setImgAttributes = mod.default
+      } catch (error) {
+        finalEl.textContent = 'Module load error: ' + error.message
+      }
+
+      let renderToken = 0
+      const renderAll = async () => {
+        const token = ++renderToken
+        const rawMarkdown = sourceEl ? sourceEl.textContent : ''
+        const markdownCont = rawMarkdown.replace(/\\{\\{LMD\\}\\}/g, lmd)
+        markdownEl.value = markdownCont
+
+        const renderedHtml = renderMarkdown(markdownCont)
+        renderedEl.textContent = renderedHtml.trim()
+        previewRoot.innerHTML = renderedHtml
+
+        if (setImgAttributes) {
+          await setImgAttributes(markdownCont, {
+            resize: true,
+            preview: true,
+          })
+        }
+
+        if (token !== renderToken) return
+        const clone = previewRoot.cloneNode(true)
+        clone.querySelectorAll('img').forEach((img) => {
+          const finalSrc = img.getAttribute('data-img-output-src')
+          if (finalSrc) img.setAttribute('src', finalSrc)
+          img.removeAttribute('data-img-output-src')
+          img.removeAttribute('data-img-src-raw')
+        })
+        finalEl.textContent = clone.innerHTML.trim()
+      }
+
+      markdownEl.addEventListener('input', () => {
+        if (!setImgAttributes) return
+        const markdownCont = markdownEl.value
+        const renderedHtml = renderMarkdown(markdownCont)
+        renderedEl.textContent = renderedHtml.trim()
+        previewRoot.innerHTML = renderedHtml
+        setImgAttributes(markdownCont, {
+          resize: true,
+          preview: true,
+        }).then(() => {
+          const clone = previewRoot.cloneNode(true)
+          clone.querySelectorAll('img').forEach((img) => {
+            const finalSrc = img.getAttribute('data-img-output-src')
+            if (finalSrc) img.setAttribute('src', finalSrc)
+            img.removeAttribute('data-img-output-src')
+            img.removeAttribute('data-img-src-raw')
+          })
+          finalEl.textContent = clone.innerHTML.trim()
+        }).catch((error) => {
+          finalEl.textContent = 'Render error: ' + error.message
+        })
+      })
+
+      renderAll().catch((error) => {
+        finalEl.textContent = 'Render error: ' + error.message
+      })
+    </script>
+  </body>
+</html>

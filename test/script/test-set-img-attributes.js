@@ -140,7 +140,7 @@ const testSetImageAttributes = async (images, options = {}, markdownContent = nu
     const setImageAttributes = (await import(scriptUrl)).default
     
     // Use legacy API: (markdownCont, option)
-    await setImageAttributes(markdownContent, { hideTitle: false, ...options })
+    await setImageAttributes(markdownContent, { autoHideResizeTitle: false, ...options })
     
     return images
   } finally {
@@ -423,7 +423,7 @@ await runTest(11, 'Resize title removal preserves data attribute', async () => {
 
   await testSetImageAttributes(images, {
     resize: true,
-    hideTitle: true
+    autoHideResizeTitle: true
   })
 
   const img = images[0]
@@ -441,7 +441,7 @@ await runTest(12, 'Keep title clears data attribute', async () => {
 
   await testSetImageAttributes(images, {
     resize: true,
-    hideTitle: false
+    autoHideResizeTitle: false
   })
 
   const img = images[0]
@@ -457,7 +457,7 @@ await runTest(13, 'Non-resize title clears data attribute', async () => {
 
   await testSetImageAttributes(images, {
     resize: true,
-    hideTitle: true
+    autoHideResizeTitle: true
   })
 
   const img = images[0]
@@ -721,6 +721,82 @@ imagescale: 200%
   const img = images[0]
   assert.strictEqual(img.getAttribute('width'), '800')
   assert.strictEqual(img.getAttribute('height'), '600')
+})
+
+// Test 30: title without resize keyword does not resize
+await runTest(30, 'Title-only value ignored', async () => {
+  const images = [
+    new MockElement('img', { src: 'cat.jpg', alt: 'cat', title: '50%' })
+  ]
+
+  await testSetImageAttributes(images, { resize: true })
+
+  const img = images[0]
+  assert.strictEqual(img.getAttribute('title'), '50%')
+  assert.strictEqual(img.getAttribute('width'), '800')
+  assert.strictEqual(img.getAttribute('height'), '600')
+})
+
+// Test 31: decimal resize value in title
+await runTest(31, 'Decimal resize in title', async () => {
+  const images = [
+    new MockElement('img', { src: 'cat.jpg', alt: 'cat', title: 'resize:12.5%' })
+  ]
+
+  await testSetImageAttributes(images, { resize: true })
+
+  const img = images[0]
+  assert.strictEqual(img.getAttribute('width'), '100')
+  assert.strictEqual(img.getAttribute('height'), '75')
+})
+
+// Test 32: data-img-resize accepts direct values
+await runTest(32, 'data-img-resize direct value', async () => {
+  const images = [
+    new MockElement('img', { src: 'cat.jpg', alt: 'cat', 'data-img-resize': '50%' })
+  ]
+
+  await testSetImageAttributes(images, { resize: true })
+
+  const img = images[0]
+  assert.strictEqual(img.getAttribute('width'), '400')
+  assert.strictEqual(img.getAttribute('height'), '300')
+})
+
+// Test 33: preview keeps markdown src and stores final src
+await runTest(33, 'preview keeps markdown src', async () => {
+  const images = [
+    new MockElement('img', { src: 'cats/cat.jpg', alt: 'cat' })
+  ]
+  const markdownWithYaml = `---
+lmd: /assets/images
+url: https://example.com/page
+urlimage: https://cdn.example.com/assets/
+---`
+
+  await testSetImageAttributes(images, { preview: true }, markdownWithYaml)
+
+  const img = images[0]
+  assert.strictEqual(img.getAttribute('src'), 'cats/cat.jpg')
+  assert.strictEqual(img.getAttribute('data-img-output-src'), 'https://cdn.example.com/assets/cats/cat.jpg')
+})
+
+// Test 34: loadSrcMap overrides measurement source
+await runTest(34, 'loadSrcMap overrides loadSrc', async () => {
+  const images = [
+    new MockElement('img', { src: 'cats/cat.jpg', alt: 'cat' })
+  ]
+  const loadSrcs = []
+
+  await testSetImageAttributes(
+    images,
+    { resize: true, loadSrcMap: { 'cats/cat.jpg': 'blob:cat' } },
+    null,
+    null,
+    (value) => loadSrcs.push(value)
+  )
+
+  assert.ok(loadSrcs.includes('blob:cat'))
 })
 
 console.log('All tests passed')

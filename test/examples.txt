@@ -19,6 +19,16 @@
 [HTML:lazy]
 <p><img src="cat.jpg" alt="Figure" title="A cat." width="400" height="300" loading="lazy"></p>
 
+[Markdown]
+![Figure](cat.jpg "50%")
+[HTML]
+<p><img src="cat.jpg" alt="Figure" title="50%" width="400" height="300"></p>
+
+[Markdown]
+![Figure](cat.jpg "resize:12.5%")
+[HTML]
+<p><img src="cat.jpg" alt="Figure" title="resize:12.5%" width="50" height="38"></p>
+
 
 [Markdown]
 ![Figure](cat_300dpi.jpg "A cat.")
@@ -94,4 +104,3 @@
 
 [HTML]
 <p><img src="/cat.jpg" alt=""></p>
-

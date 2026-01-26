@@ -1,5 +1,5 @@
 const scaleSuffixReg = /[@._-]([0-9]+)(x|dpi|ppi)$/
-const resizeReg = /(?:(?:(?:大きさ|サイズ)の?変更|リサイズ|resize(?:d to)?) *[:：]? *([0-9]+)([%％]|px)|([0-9]+)([%％]|px)[にへ](?:(?:大きさ|サイズ)を?変更|リサイズ))/i
+const resizeReg = /(?:(?:(?:大きさ|サイズ)の?変更|リサイズ|resize(?:d to)?) *[:：]? *([0-9]+(?:\.[0-9]+)?)([%％]|px)|([0-9]+(?:\.[0-9]+)?)([%％]|px)[にへ](?:(?:大きさ|サイズ)を?変更|リサイズ))/i
 const resizeValueReg = /^([0-9]+(?:\.[0-9]+)?)(%|px)$/i
 const yamlReg = /^--- *\n([\s\S]*?)\n---/
 
@@ -117,10 +117,6 @@ const normalizeResizeValue = (value) => {
     if (!resizeValue || !resizeUnit) return ''
     const normalizedUnit = resizeUnit === '％' ? '%' : resizeUnit.toLowerCase()
     return `${resizeValue}${normalizedUnit}`
-  }
-  const directMatch = text.match(resizeValueReg)
-  if (directMatch) {
-    return `${directMatch[1]}${directMatch[2].toLowerCase()}`
   }
   return ''
 }

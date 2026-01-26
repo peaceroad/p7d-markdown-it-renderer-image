@@ -108,6 +108,10 @@ Same as Node options except remote sizing options, plus:
 
 - `readMeta` (false): read `meta[name="markdown-frontmatter"]` (JSON).
 - `observe` (false): watch DOM mutations and re-run processing.
+- `preview` (false): keep the markdown `src` for preview (relative paths stay relative) and store the final URL in `previewOutputSrcAttr`.
+- `previewOutputSrcAttr` (`data-img-output-src`): attribute name to store the final URL when `preview` is enabled (set `''` to disable).
+- `loadSrcResolver` (null): function to override the measurement source (`loadSrc`) for size calculation (DOM only).
+- `loadSrcMap` (null): map of `src` -> `loadSrc` overrides for size calculation (DOM only).
 
 `readMeta`/`observe` are opt-in to avoid extra DOM work in normal pages; enable them for live preview scenarios (e.g., VS Code).
 
@@ -206,6 +210,12 @@ lmd: C:\Users\User\Documents\manuscript
 
 In VS Code, pass a Webview URI (e.g., `asWebviewUri`) instead of a raw `file://` path.
 
+#### Preview local src in DOM
+
+When `preview: true`, the DOM script keeps the markdown `src` for display (relative paths stay relative). The final URL is stored in `previewOutputSrcAttr` (default `data-img-output-src`) so you can copy/export HTML with the CDN URL. The original markdown `src` is cached in `data-img-src-raw` to keep reprocessing stable; `lmd` is still used for size measurement when available. In VS Code Webview, relative `src` may not resolve, so keep `preview: false` there.
+
+If you need to measure sizes from Blob URLs (e.g., drag-and-drop files), pass `loadSrcResolver` or `loadSrcMap` so the DOM script uses those URLs only for measurement without changing the displayed `src`. Functions cannot be provided via `readMeta` JSON, so use direct options for `loadSrcResolver`.
+
 Only `.html`, `.htm`, `.xhtml` are treated as file names when deriving the path from `url` (used by `urlimagebase`).
 
 - `url: https://example.com/page` -> `/page/`
@@ -270,11 +280,9 @@ md.render('![Figure](cat.jpg "resize:50%")', { mdPath: mdPat })
 
 If you render HTML with the Node plugin and then run the DOM script, keep `resizeDataAttr: 'data-img-resize'` (default) so the resize hint survives title removal. If you do not need DOM reprocessing, set `resizeDataAttr: ''` to avoid extra attributes.
 
-### Advanced/legacy options
+### Advanced options
 
-- `hideTitle`: legacy alias for `autoHideResizeTitle` (internal; avoid new usage).
 - `imgSrcPrefix`: rewrites only the origin of the resolved base URL (advanced; avoid new usage). Example: base `https://example.com/assets/` + `imgSrcPrefix: https://cdn.example.com/` -> `https://cdn.example.com/assets/`.
-- `suppressLoadErrors`: legacy alias for `suppressErrors` (`true` -> `all`, `false` -> `none`).
 
 ### Set `loading` and `decoding` attributes
 

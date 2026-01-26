@@ -10,7 +10,7 @@ if (isWindows) {
   __dirname = __dirname.replace(/^\/+/, '').replace(/\//g, '\\')
 }
 
-const commonOpt = { scaleSuffix: true, resize: true, hideTitle: false }
+const commonOpt = { scaleSuffix: true, resize: true, autoHideResizeTitle: false }
 const md = mdit().use(mditRendererImage, commonOpt);
 //const mdLazy = mdit().use(mditRendererImage, {scaleSuffix: true, lazyLoad: true, asyncDecode: true});
 const mdLazy = mdit().use(mditRendererImage, { ...commonOpt, lazyLoad: true });
@@ -145,7 +145,7 @@ console.log('test.js - examples-hideTitle-default.txt')
 
 n = 1;
 while(n < msHide.length) {
-  console.log('Test (hideTitle default): ' + n + ' >>>');
+  console.log('Test (autoHideResizeTitle default): ' + n + ' >>>');
 
   const m = msHide[n].markdown;
   const renderEnv = { mdPath: mdPat }
@@ -154,12 +154,12 @@ while(n < msHide.length) {
     assert.ok(htmlMatches(h, msHide[n].html));
   } catch(e) {
     pass = false
-    console.log('incorrect(hideTitle default): ');
+    console.log('incorrect(autoHideResizeTitle default): ');
     console.log('H: ' + h +'C: ' + msHide[n].html);
   };
 
   n++;
 }
 
-if (pass) console.log('\nAll tests passed (including hideTitle default)')
+if (pass) console.log('\nAll tests passed (including autoHideResizeTitle default)')
 if (!pass) process.exitCode = 1

@@ -13,6 +13,16 @@
 [HTML]
 <p><img src="cat.jpg" alt="Figure" title="A cat." width="400" height="300"></p>
 
+[Markdown]
+![Figure](cat.jpg "50%")
+[HTML]
+<p><img src="cat.jpg" alt="Figure" title="50%" width="400" height="300"></p>
+
+[Markdown]
+![Figure](cat.jpg "resize:12.5%")
+[HTML]
+<p><img src="cat.jpg" alt="Figure" width="50" height="38" data-img-resize="12.5%"></p>
+
 
 [Markdown]
 ![Figure](cat_300dpi.jpg "A cat.")

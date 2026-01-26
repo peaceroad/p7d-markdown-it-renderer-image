@@ -1,5 +1,5 @@
 export default async (markdownCont, option) => {
-  const { setImgSize, parseFrontmatter, getFrontmatter, normalizeRelativePath, resolveImageBase, normalizeResizeValue } = await import('./img-util.js')
+  const { setImgSize, parseFrontmatter, getFrontmatter, normalizeRelativePath, resolveImageBase, normalizeResizeValue, resizeValueReg } = await import('./img-util.js')
 
   const isHttpUrl = (value) => /^https?:\/\//i.test(value)
   const isProtocolRelativeUrl = (value) => /^\/\//.test(value)
@@ -41,6 +41,12 @@ export default async (markdownCont, option) => {
     const lastSlashIndex = Math.max(cleanSrc.lastIndexOf('/'), cleanSrc.lastIndexOf('\\'))
     return cleanSrc.substring(lastSlashIndex + 1)
   }
+  const normalizeExtensions = (value) => (value || '')
+    .split(',')
+    .map((ext) => ext.trim().replace(/^\.+/, ''))
+    .filter(Boolean)
+    .map(escapeForRegExp)
+  const originalSrcAttr = 'data-img-src-raw'
   const applyOutputUrlMode = (value, mode) => {
     if (!value || !mode || mode === 'absolute') return value
     if (mode === 'protocol-relative') {
@@ -70,12 +76,14 @@ export default async (markdownCont, option) => {
     imgSrcPrefix: '', // replace origin of base URL
     urlImageBase: '', // fallback base when frontmatter lacks urlimagebase
     outputUrlMode: 'absolute', // absolute | protocol-relative | path-only
-    hideTitle: false, // legacy alias (use autoHideResizeTitle)
+    preview: false, // show markdown src in preview when available
+    previewOutputSrcAttr: 'data-img-output-src', // store final src when preview is true
     autoHideResizeTitle: true, // remove title when resize hint used
     resizeDataAttr: 'data-img-resize', // store resize hint when title removed
+    loadSrcResolver: null, // override loadSrc for size measurement
+    loadSrcMap: null, // map markdown src to loadSrc for size measurement
     noUpscale: true, // internal: prevent final size from exceeding original pixels
     suppressErrors: 'none', // 'none' | 'all' | 'local' | 'remote'
-    suppressLoadErrors: false, // legacy alias (use suppressErrors)
     readMeta: false, // read meta[name="markdown-frontmatter"]
     observe: false, // watch DOM changes
   }
@@ -85,14 +93,6 @@ export default async (markdownCont, option) => {
   }
   if (safeOption) Object.assign(opt, safeOption)
   const optionOverrides = new Set(safeOption ? Object.keys(safeOption) : [])
-  if (optionOverrides.has('hideTitle') && !optionOverrides.has('autoHideResizeTitle')) {
-    opt.autoHideResizeTitle = opt.hideTitle
-    optionOverrides.add('autoHideResizeTitle')
-  }
-  if (optionOverrides.has('suppressLoadErrors') && !optionOverrides.has('suppressErrors')) {
-    opt.suppressErrors = opt.suppressLoadErrors ? 'all' : 'none'
-    optionOverrides.add('suppressErrors')
-  }
 
   const readMetaFrontmatter = () => {
     if (!opt.readMeta) return null
@@ -121,9 +121,17 @@ export default async (markdownCont, option) => {
       if (optionOverrides.has(key)) return
       if (typeof value === 'boolean') targetOpt[key] = value
     }
+    const setFunc = (key, value) => {
+      if (optionOverrides.has(key)) return
+      if (typeof value === 'function') targetOpt[key] = value
+    }
     const setString = (key, value) => {
       if (optionOverrides.has(key)) return
       if (typeof value === 'string') targetOpt[key] = value
+    }
+    const setObject = (key, value) => {
+      if (optionOverrides.has(key)) return
+      if (value && typeof value === 'object' && !Array.isArray(value)) targetOpt[key] = value
     }
 
     setBool('scaleSuffix', rendererSettings.scaleSuffix)
@@ -131,15 +139,16 @@ export default async (markdownCont, option) => {
     setBool('lazyLoad', rendererSettings.lazyLoad)
     setBool('asyncDecode', rendererSettings.asyncDecode)
     setBool('modifyImgSrc', rendererSettings.modifyImgSrc)
+    setBool('preview', rendererSettings.preview)
     setString('imgSrcPrefix', rendererSettings.imgSrcPrefix)
     setString('urlImageBase', rendererSettings.urlImageBase)
     setString('outputUrlMode', rendererSettings.outputUrlMode)
     setString('checkImgExtensions', rendererSettings.checkImgExtensions)
     setString('resizeDataAttr', rendererSettings.resizeDataAttr)
+    setString('previewOutputSrcAttr', rendererSettings.previewOutputSrcAttr)
     setString('suppressErrors', rendererSettings.suppressErrors)
-    if (!optionOverrides.has('suppressErrors') && typeof rendererSettings.suppressLoadErrors === 'boolean') {
-      targetOpt.suppressErrors = rendererSettings.suppressLoadErrors ? 'all' : 'none'
-    }
+    setFunc('loadSrcResolver', rendererSettings.loadSrcResolver)
+    setObject('loadSrcMap', rendererSettings.loadSrcMap)
 
     if (!optionOverrides.has('scaleSuffix') && typeof rendererSettings.disableScaleSuffix === 'boolean') {
       targetOpt.scaleSuffix = !rendererSettings.disableScaleSuffix
@@ -153,9 +162,6 @@ export default async (markdownCont, option) => {
 
     if (!optionOverrides.has('autoHideResizeTitle') && typeof rendererSettings.autoHideResizeTitle === 'boolean') {
       targetOpt.autoHideResizeTitle = rendererSettings.autoHideResizeTitle
-    }
-    if (!optionOverrides.has('autoHideResizeTitle') && typeof rendererSettings.hideTitle === 'boolean') {
-      targetOpt.autoHideResizeTitle = rendererSettings.hideTitle
     }
     if (!optionOverrides.has('autoHideResizeTitle') && typeof rendererSettings.keepTitle === 'boolean') {
       targetOpt.autoHideResizeTitle = !rendererSettings.keepTitle
@@ -208,12 +214,22 @@ export default async (markdownCont, option) => {
       if (!isProtocolRelativeUrl(adjustedLmd) && !isFileUrl(adjustedLmd) && !hasUrlScheme(adjustedLmd) && !hasSpecialScheme(adjustedLmd)) {
         adjustedLmd = 'file:///' + adjustedLmd.replace(/^\/+/, '')
       }
-      if (adjustedLmd && !adjustedLmd.endsWith('/')) adjustedLmd += '/'
+    if (adjustedLmd && !adjustedLmd.endsWith('/')) adjustedLmd += '/'
     }
     const resizeDataAttr = typeof currentOpt.resizeDataAttr === 'string' && currentOpt.resizeDataAttr.trim()
       ? currentOpt.resizeDataAttr
       : ''
-    const imgExtReg = new RegExp('\\.(?:' + currentOpt.checkImgExtensions.split(',').join('|') + ')(?=$|[?#])', 'i')
+    const outputSrcAttr = typeof currentOpt.previewOutputSrcAttr === 'string' && currentOpt.previewOutputSrcAttr.trim()
+      ? currentOpt.previewOutputSrcAttr
+      : ''
+    const extPattern = normalizeExtensions(currentOpt.checkImgExtensions).join('|')
+    const imgExtReg = extPattern
+      ? new RegExp('\\.(?:' + extPattern + ')(?=$|[?#])', 'i')
+      : /a^/
+    const loadSrcResolver = typeof currentOpt.loadSrcResolver === 'function' ? currentOpt.loadSrcResolver : null
+    const loadSrcMap = currentOpt.loadSrcMap && typeof currentOpt.loadSrcMap === 'object'
+      ? currentOpt.loadSrcMap
+      : null
 
     return {
       opt: currentOpt,
@@ -222,6 +238,9 @@ export default async (markdownCont, option) => {
       adjustedLmd,
       imgExtReg,
       resizeDataAttr,
+      outputSrcAttr,
+      loadSrcResolver,
+      loadSrcMap,
       imageDir,
       hasImageDir,
       imageScale,
@@ -234,56 +253,93 @@ export default async (markdownCont, option) => {
     const context = buildContext()
     if (context.skip) return []
 
-    const { opt: currentOpt, imageBase, lidPattern, adjustedLmd, imgExtReg, resizeDataAttr, imageDir, hasImageDir, imageScale } = context
+    const { opt: currentOpt, imageBase, lidPattern, adjustedLmd, imgExtReg, resizeDataAttr, outputSrcAttr, loadSrcResolver, loadSrcMap, imageDir, hasImageDir, imageScale } = context
     const images = targetImages ? Array.from(targetImages) : Array.from(document.querySelectorAll('img'))
     if (images.length === 0) return []
     const setImagePromises = images.map(async (img) => {
       if (typeof img.isConnected === 'boolean' && !img.isConnected) return
-      const srcRaw = img.getAttribute('src') || ''
+        const storedOriginalSrc = getAttr(img, originalSrcAttr)
+        const srcRaw = storedOriginalSrc || getAttr(img, 'src') || ''
       const srcBase = stripQueryHash(srcRaw)
       const srcSuffix = srcRaw.slice(srcBase.length)
-      const isLocalSrc = !isHttpUrl(srcRaw) && !isProtocolRelativeUrl(srcRaw) && !isFileUrl(srcRaw)
+      const isLocalSrc = !isHttpUrl(srcRaw)
+        && !isProtocolRelativeUrl(srcRaw)
+        && !isFileUrl(srcRaw)
+        && !hasSpecialScheme(srcRaw)
 
       let src = srcBase
       let finalSrc = srcRaw
       let loadSrc = srcRaw
 
-      if (currentOpt.modifyImgSrc) {
-        if (isLocalSrc) {
-          if (lidPattern) src = src.replace(lidPattern, '')
+        if (currentOpt.modifyImgSrc) {
+          if (isLocalSrc) {
+            if (lidPattern) src = src.replace(lidPattern, '')
 
-          const localNormalized = normalizeRelativePath(src)
-          if (adjustedLmd) loadSrc = adjustedLmd + localNormalized + srcSuffix
+            const localNormalized = normalizeRelativePath(src)
+            if (adjustedLmd) loadSrc = adjustedLmd + localNormalized + srcSuffix
 
-          let nextSrc = localNormalized
-          if (imageBase && !localNormalized.startsWith('/')) {
-            if (hasImageDir) {
-              nextSrc = getBasename(nextSrc)
-              if (imageDir) nextSrc = `${imageDir}${nextSrc}`
+            let nextSrc = localNormalized
+            if (imageBase && !localNormalized.startsWith('/')) {
+              if (hasImageDir) {
+                nextSrc = getBasename(nextSrc)
+                if (imageDir) nextSrc = `${imageDir}${nextSrc}`
+              }
+              nextSrc = `${imageBase}${nextSrc}`
             }
-            nextSrc = `${imageBase}${nextSrc}`
+            src = normalizeRelativePath(nextSrc)
           }
-          src = normalizeRelativePath(nextSrc)
+          finalSrc = applyOutputUrlMode(src + srcSuffix, currentOpt.outputUrlMode)
+        } else {
+          finalSrc = applyOutputUrlMode(src + srcSuffix, currentOpt.outputUrlMode)
         }
-        finalSrc = applyOutputUrlMode(src + srcSuffix, currentOpt.outputUrlMode)
-        setAttrIfChanged(img, 'src', finalSrc)
-      }
 
-      // Decide source used for size measurement
-      if (!currentOpt.modifyImgSrc) {
-        finalSrc = applyOutputUrlMode(src + srcSuffix, currentOpt.outputUrlMode)
-        loadSrc = finalSrc
-      } else if (!adjustedLmd || !isLocalSrc) {
-        loadSrc = finalSrc
-      }
+        // Decide source used for size measurement
+        if (!currentOpt.modifyImgSrc) {
+          loadSrc = finalSrc
+        } else if (!adjustedLmd || !isLocalSrc) {
+          loadSrc = finalSrc
+        }
+        if (loadSrcResolver) {
+          const resolved = loadSrcResolver(srcRaw, {
+            finalSrc,
+            loadSrc,
+            isLocalSrc,
+            isRemote: isHttpUrl(loadSrc) || isProtocolRelativeUrl(loadSrc),
+          })
+          if (typeof resolved === 'string' && resolved) {
+            loadSrc = resolved
+          }
+        } else if (loadSrcMap) {
+          const mapped = loadSrcMap[srcRaw] || loadSrcMap[finalSrc]
+          if (typeof mapped === 'string' && mapped) {
+            loadSrc = mapped
+          }
+        }
+
+        let displaySrc = finalSrc
+        if (currentOpt.preview && isLocalSrc) {
+          displaySrc = storedOriginalSrc || srcRaw
+        }
+        if (currentOpt.preview) {
+          if (!storedOriginalSrc && srcRaw) setAttrIfChanged(img, originalSrcAttr, srcRaw)
+          if (outputSrcAttr && finalSrc) setAttrIfChanged(img, outputSrcAttr, finalSrc)
+        }
+        setAttrIfChanged(img, 'src', displaySrc)
 
       const alt = img.alt
       if (alt) setAttrIfChanged(img, 'alt', alt)
       const titleAttr = getAttr(img, 'title')
       const storedTitle = resizeDataAttr ? getAttr(img, resizeDataAttr) : ''
       const titleResizeValue = currentOpt.resize ? normalizeResizeValue(titleAttr) : ''
-      const storedResizeValue = currentOpt.resize ? normalizeResizeValue(storedTitle) : ''
+      let storedResizeValue = ''
+      if (currentOpt.resize && storedTitle) {
+        const normalizedStored = String(storedTitle).trim().replace('％', '%').toLowerCase()
+        if (resizeValueReg.test(normalizedStored)) storedResizeValue = normalizedStored
+      }
       const resizeValue = titleResizeValue || (!titleAttr ? storedResizeValue : '')
+      const resizeTitleForSize = titleResizeValue
+        ? titleAttr
+        : (!titleAttr && storedResizeValue ? `resize:${storedResizeValue}` : '')
       const hasResizeHint = currentOpt.resize && !!resizeValue
 
       const removeTitle = currentOpt.autoHideResizeTitle && !!titleResizeValue
@@ -323,7 +379,7 @@ export default async (markdownCont, option) => {
         const suppressByType = currentOpt.suppressErrors === 'all'
           || (currentOpt.suppressErrors === 'local' && !isRemoteForError)
           || (currentOpt.suppressErrors === 'remote' && isRemoteForError)
-        const suppressLoadErrors = currentOpt.suppressLoadErrors || suppressByType
+        const suppressLoadErrors = suppressByType
         originalImage.setAttribute('src', loadSrc)
         try {
           let loadError = false
@@ -345,15 +401,15 @@ export default async (markdownCont, option) => {
 
         if (originalImage.naturalWidth && originalImage.naturalHeight) {
           const imgName = getImageName(sizeSrc)
-          const { width, height } = setImgSize(
-            imgName,
-            { width: originalImage.naturalWidth, height: originalImage.naturalHeight },
-            currentOpt.scaleSuffix,
-            currentOpt.resize,
-            resizeValue,
-            imageScale,
-            currentOpt.noUpscale
-          )
+            const { width, height } = setImgSize(
+              imgName,
+              { width: originalImage.naturalWidth, height: originalImage.naturalHeight },
+              currentOpt.scaleSuffix,
+              currentOpt.resize,
+              resizeTitleForSize,
+              imageScale,
+              currentOpt.noUpscale
+            )
 
           setAttrIfChanged(img, 'width', width)
           setAttrIfChanged(img, 'height', height)

@@ -20,10 +20,12 @@
    - Read `srcRaw`; compute base + query/hash.
    - If `modifyImgSrc`: strip `lid`; build `loadSrc` from `lmd` + normalized local path (before base); prepend image base (`urlimage` absolute > `urlimagebase`/`urlImageBase` + url path > `url`) for final `src` when relative, normalize; if `urlimage` is relative, insert it as an image directory and use basename-only; apply `outputUrlMode`; keep query/hash; set final `src` on the element.
    - `lmd` handling: keep existing URL schemes (http/https/file/vscode-*/data/blob); otherwise treat `lmd` as a local path and prepend `file:///` and a trailing slash.
+   - If `preview` is true, keep the markdown `src` for display and store the final URL in `previewOutputSrcAttr` (default `data-img-output-src`); cache the original `src` in `data-img-src-raw`. `lmd` is still used for size measurement when available.
+   - `loadSrcResolver` or `loadSrcMap` can override the measurement source (`loadSrc`) for size calculation (e.g., Blob URLs) without changing the displayed `src`.
    - Set `alt`, `title` (or remove if autoHideResizeTitle and resize/title match); when removed, store the resize hint in `resizeDataAttr` for later DOM updates; when title is kept or non-resize, clear `resizeDataAttr`; apply `loading`/`decoding` defaults if absent.
    - Choose loadSrc: `lmd`-prefixed path if provided, else final `src`; load into an Image.
    - On load, if extension matches, use naturalWidth/Height with `setImgSize` (scaleSuffix, resize via title, imagescale, noUpscale always on) to set width/height. Extension match ignores query/hash.
-   - `suppressErrors` silences image load errors (legacy alias: `suppressLoadErrors`). Use this file in browsers; `index.js` is Node-oriented.
+   - `suppressErrors` silences image load errors. Use this file in browsers; `index.js` is Node-oriented.
 4. When `observe: true`, uses MutationObserver to re-run processing on DOM and meta changes (live previews).
 
 ## Utilities (script/img-util.js)
@@ -42,7 +44,7 @@
 - Relative `urlimage` enforces basename-only for relative `src` when a base URL is used.
 - `outputUrlMode: path-only` assumes same-origin and will drop the domain.
 - `imgSrcPrefix` rewrites the base origin; it is easy to misconfigure when combined with `urlimage`/`urlimagebase`.
-- `hideTitle` is a legacy internal alias for `autoHideResizeTitle` (avoid new usage).
+- `preview: true` keeps the markdown `src` for display; in VS Code Webview, relative paths may not resolve, so keep preview off there.
 
 ## Browser Notes
 - Safari Technology Preview 222: `<figcaption>` inside `<figure>` contributes to `<img>` accessible name only when no `alt`, ARIA, or `title` is present (295746@main / 150597445).
