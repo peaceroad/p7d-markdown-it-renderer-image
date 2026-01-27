@@ -3,21 +3,39 @@ const resizeReg = /(?:(?:(?:大きさ|サイズ)の?変更|リサイズ|resize(?
 const resizeValueReg = /^([0-9]+(?:\.[0-9]+)?)(%|px)$/i
 const yamlReg = /^--- *\n([\s\S]*?)\n---/
 
-const stripQueryHash = (value) => value.split(/[?#]/)[0]
-const isAbsoluteUrl = (value) => /^(?:[a-z][a-z0-9+.-]*:)?\/\//i.test(value)
-const isHtmlFile = (value) => /\.(html|htm|xhtml)$/i.test(value || '')
+const toText = (value) => {
+  if (typeof value === 'string') return value
+  if (value instanceof String) return value.valueOf()
+  return ''
+}
+const stripQueryHash = (value) => {
+  const text = toText(value)
+  if (!text) return ''
+  return text.split(/[?#]/)[0]
+}
+const isAbsoluteUrl = (value) => {
+  const text = toText(value)
+  if (!text) return false
+  return /^(?:[a-z][a-z0-9+.-]*:)?\/\//i.test(text)
+}
+const isHtmlFile = (value) => {
+  const text = toText(value)
+  if (!text) return false
+  return /\.(html|htm|xhtml)$/i.test(text)
+}
 
 const normalizeRelativePath = (path) => {
-  if (!path) return path
-  const urlSchemeMatch = path.match(/^([a-z]+:\/\/)(.*)/)
+  const text = toText(path)
+  if (!text) return text
+  const urlSchemeMatch = text.match(/^([a-z]+:\/\/)(.*)/)
   if (urlSchemeMatch) {
     const scheme = urlSchemeMatch[1]
     const pathPart = urlSchemeMatch[2]
     return scheme + normalizeRelativePath(pathPart)
   }
   
-  const isAbsolute = path.startsWith('/')
-  const segments = path.split('/')
+  const isAbsolute = text.startsWith('/')
+  const segments = text.split('/')
   const normalized = []
   
   for (const segment of segments) {
@@ -42,23 +60,27 @@ const normalizeRelativePath = (path) => {
 }
 
 const ensureTrailingSlash = (value) => {
-  if (!value) return value
-  return value.endsWith('/') ? value : value + '/'
+  const text = toText(value)
+  if (!text) return text
+  return text.endsWith('/') ? text : text + '/'
 }
 
 const applyImgSrcPrefix = (value, imgSrcPrefix) => {
-  if (!value || !imgSrcPrefix) return value
-  let prefix = imgSrcPrefix
+  const text = toText(value)
+  const prefixText = toText(imgSrcPrefix)
+  if (!text || !prefixText) return text
+  let prefix = prefixText
   if (!prefix.endsWith('/')) prefix += '/'
-  return value.replace(/^https?:\/\/.*?\//, prefix)
+  return text.replace(/^https?:\/\/.*?\//, prefix)
 }
 
 const getUrlPath = (value) => {
-  if (!value) return ''
-  const clean = stripQueryHash(value)
+  const text = toText(value)
+  if (!text) return ''
+  const clean = stripQueryHash(text)
   const normalizePath = (input) => {
-    const path = input || '/'
-    const trimmed = path.replace(/\/+$/, '')
+    const pathText = toText(input) || '/'
+    const trimmed = pathText.replace(/\/+$/, '')
     const last = trimmed.split('/').pop() || ''
     if (isHtmlFile(last)) {
       const index = trimmed.lastIndexOf('/')
@@ -75,14 +97,16 @@ const getUrlPath = (value) => {
 }
 
 const joinUrl = (base, path) => {
-  if (!base) return path || ''
-  const baseWithSlash = ensureTrailingSlash(base)
-  if (!path) return baseWithSlash
-  return baseWithSlash + path.replace(/^\/+/, '')
+  const baseText = toText(base)
+  const pathText = toText(path)
+  if (!baseText) return pathText || ''
+  const baseWithSlash = ensureTrailingSlash(baseText)
+  if (!pathText) return baseWithSlash
+  return baseWithSlash + pathText.replace(/^\/+/, '')
 }
 
 const parseFrontmatter = (markdownCont) => {
-  if (!markdownCont) return {}
+  if (typeof markdownCont !== 'string' || !markdownCont) return {}
   const yamlMatch = markdownCont.match(yamlReg)
   if (!yamlMatch) return {}
   const yamlContent = yamlMatch[1]
@@ -196,22 +220,22 @@ const setImgSize = (imgName, imgData, scaleSuffix, resize, title, imageScale, no
 }
 
 const getFrontmatter = (frontmatter, opt) => {
-  if (!frontmatter) return null
+  if (!frontmatter || typeof frontmatter !== 'object' || Array.isArray(frontmatter)) return null
 
-  let lid = frontmatter.lid
+  let lid = toText(frontmatter.lid)
   if (lid) {
     if (!/\/$/.test(lid)) lid += '/'
     if (/^.\//.test(lid)) lid = lid.replace(/^.\//, '')
   }
-  let url = frontmatter.url
+  let url = toText(frontmatter.url)
   if (url) {
     if (!url.endsWith('/')) url += '/'
   }
   const hasUrlImageKey = Object.prototype.hasOwnProperty.call(frontmatter, 'urlimage')
     || Object.prototype.hasOwnProperty.call(frontmatter, 'urlImage')
-  let urlimage = typeof frontmatter.urlimage === 'string' ? frontmatter.urlimage : ''
-  if (!urlimage && typeof frontmatter.urlImage === 'string') {
-    urlimage = frontmatter.urlImage
+  let urlimage = toText(frontmatter.urlimage)
+  if (!urlimage) {
+    urlimage = toText(frontmatter.urlImage)
   }
   let imageDir = ''
   let hasImageDir = false
@@ -223,9 +247,9 @@ const getFrontmatter = (frontmatter, opt) => {
     imageDir = urlimage
     urlimage = ''
   }
-  let urlimagebase = typeof frontmatter.urlimagebase === 'string' ? frontmatter.urlimagebase : ''
-  if (!urlimagebase && typeof frontmatter.urlImageBase === 'string') {
-    urlimagebase = frontmatter.urlImageBase
+  let urlimagebase = toText(frontmatter.urlimagebase)
+  if (!urlimagebase) {
+    urlimagebase = toText(frontmatter.urlImageBase)
   }
   if (urlimagebase) {
     if (!urlimagebase.endsWith('/')) urlimagebase += '/'
@@ -236,7 +260,7 @@ const getFrontmatter = (frontmatter, opt) => {
     if (/^.\//.test(imageDir)) imageDir = imageDir.replace(/^.\//, '')
     imageDir = imageDir.replace(/^\/+/, '')
   }
-  let lmd = frontmatter.lmd
+  let lmd = toText(frontmatter.lmd)
   if (lmd) {
     if (!/\/$/.test(lmd)) lmd += '/'
   }

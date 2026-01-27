@@ -4,7 +4,7 @@ import path from 'path'
 import mdit from 'markdown-it'
 import mditMeta from 'markdown-it-meta'
 import mditRendererImage from '../index.js'
-import { parseFrontmatter } from '../script/img-util.js'
+import { parseFrontmatter, normalizeRelativePath, getFrontmatter } from '../script/img-util.js'
 
 let __dirname = path.dirname(new URL(import.meta.url).pathname)
 const isWindows = (process.platform === 'win32')
@@ -264,6 +264,27 @@ try {
 } catch (e) {
   pass = false
   console.log('incorrect(urlimage/urlimagebase): ')
+  console.log(e.message)
+}
+
+console.log('===========================================================')
+console.log('test-yaml-frontmatter.js - non-string guards')
+try {
+  assert.deepStrictEqual(parseFrontmatter(null), {})
+  assert.deepStrictEqual(parseFrontmatter(123), {})
+  assert.strictEqual(normalizeRelativePath(null), '')
+  assert.strictEqual(normalizeRelativePath(123), '')
+  assert.strictEqual(normalizeRelativePath({}), '')
+  assert.strictEqual(getFrontmatter(null, {}), null)
+  assert.strictEqual(getFrontmatter(123, {}), null)
+  const fm = getFrontmatter({ url: 123, urlimage: {}, lid: true, lmd: [] }, {})
+  assert.strictEqual(fm.url, '')
+  assert.strictEqual(fm.urlimage, '')
+  assert.strictEqual(fm.lid, '')
+  assert.strictEqual(fm.lmd, '')
+} catch (e) {
+  pass = false
+  console.log('incorrect(non-string guards): ')
   console.log(e.message)
 }
 

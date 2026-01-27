@@ -31,6 +31,7 @@
 ## Utilities (script/img-util.js)
 - Frontmatter parsing, path normalization, resize/scaleSuffix regexes, image base resolution, and size adjustment (`setImgSize`).
 - URL path extraction treats only `.html`, `.htm`, `.xhtml` as file names; other dotted segments are kept as directories.
+- Utility helpers treat non-string inputs as empty values to avoid runtime TypeErrors.
 
 ## Testing
 - `npm test` for Node-side plugin + YAML frontmatter tests.
