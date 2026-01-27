@@ -108,12 +108,16 @@ Same as Node options except remote sizing options, plus:
 
 - `readMeta` (false): read `meta[name="markdown-frontmatter"]` (JSON).
 - `observe` (false): watch DOM mutations and re-run processing.
-- `preview` (false): keep the markdown `src` for preview (relative paths stay relative) and store the final URL in `previewOutputSrcAttr`.
-- `previewOutputSrcAttr` (`data-img-output-src`): attribute name to store the final URL when `preview` is enabled (set `''` to disable).
+- `previewMode` (`output`): `output` | `markdown` | `local`.
+  - `output`: display final URL (default).
+  - `markdown`: display the original markdown `src` (best for drag & drop/blob mapping).
+  - `local`: display a local file URL when `lmd` is an absolute path.
+- `previewOutputSrcAttr` (`data-img-output-src`): attribute name to store the final URL when `previewMode !== output` (set `''` to disable).
 - `loadSrcResolver` (null): function to override the measurement source (`loadSrc`) for size calculation (DOM only).
 - `loadSrcMap` (null): map of `src` -> `loadSrc` overrides for size calculation (DOM only).
 
 `readMeta`/`observe` are opt-in to avoid extra DOM work in normal pages; enable them for live preview scenarios (e.g., VS Code).
+When running a page from `file://`, the DOM script defaults `suppressErrors` to `local` unless you explicitly set `suppressErrors`, to reduce noisy console errors from local image probes.
 
 ## Options (details)
 
@@ -129,7 +133,7 @@ Frontmatter keys:
 - `urlimage`: image base URL (absolute) or image directory (relative/empty). alias: `urlImage`.
 - `urlimagebase`: base URL used with the path from `url`. alias: `urlImageBase`.
 - `lid`: local image directory prefix to strip from relative `src` so the remaining subpath can be reused in the final URL.
-- `lmd`: local media directory for DOM size loading.
+- `lmd`: local media directory for DOM size loading. If it is an absolute path without a scheme, it is converted to a `file:///` URL with encoded segments; relative paths are kept as-is.
 - `imagescale`: scale factor applied to all images (e.g. `60%` or `0.6`, values above 100% are capped). alias: `imageScale`.
 
 Base selection order:
@@ -212,7 +216,7 @@ In VS Code, pass a Webview URI (e.g., `asWebviewUri`) instead of a raw `file://`
 
 #### Preview local src in DOM
 
-When `preview: true`, the DOM script keeps the markdown `src` for display (relative paths stay relative). The final URL is stored in `previewOutputSrcAttr` (default `data-img-output-src`) so you can copy/export HTML with the CDN URL. The original markdown `src` is cached in `data-img-src-raw` to keep reprocessing stable; `lmd` is still used for size measurement when available. In VS Code Webview, relative `src` may not resolve, so keep `preview: false` there.
+When `previewMode` is `markdown` or `local`, the DOM script stores the final URL in `previewOutputSrcAttr` (default `data-img-output-src`) so you can copy/export HTML with the CDN URL. The original markdown `src` is cached in `data-img-src-raw` to keep reprocessing stable; `lmd` is still used for size measurement when available. In VS Code Webview, relative `src` may not resolve, so use `previewMode: 'output'` there.
 
 If you need to measure sizes from Blob URLs (e.g., drag-and-drop files), pass `loadSrcResolver` or `loadSrcMap` so the DOM script uses those URLs only for measurement without changing the displayed `src`. Functions cannot be provided via `readMeta` JSON, so use direct options for `loadSrcResolver`.
 

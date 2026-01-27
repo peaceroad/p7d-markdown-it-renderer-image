@@ -353,6 +353,53 @@ await runTest(8, 'Error handling', async () => {
   }
 })
 
+// Test 8.5: file:// auto suppresses local errors when not overridden
+await runTest(8.5, 'file:// auto suppresses local errors', async () => {
+  const images = [
+    new MockElement('img', { src: 'broken.jpg', alt: 'broken' })
+  ]
+  const originalDocument = global.document
+  const originalImage = global.Image
+  const originalLocation = global.location
+  const originalConsoleError = console.error
+  let errorCount = 0
+  global.location = { protocol: 'file:' }
+  console.error = () => { errorCount += 1 }
+  global.document = createMockDocument(images)
+  global.Image = class MockImageWithError extends MockElement {
+    constructor() {
+      super('img')
+      this.complete = false
+      this.naturalWidth = 0
+      this.naturalHeight = 0
+    }
+    setAttribute(name, value) {
+      super.setAttribute(name, value)
+      if (name === 'src') {
+        setTimeout(() => {
+          if (this.onerror) this.onerror()
+        }, 0)
+      }
+    }
+  }
+  try {
+    const scriptPath = path.resolve(__dirname, '../../script/set-img-attributes.js')
+    const scriptUrl = new URL(`file:///${scriptPath.replace(/\\/g, '/')}`).href
+    const setImageAttributes = (await import(scriptUrl)).default
+    await setImageAttributes('', {})
+    assert.strictEqual(errorCount, 0)
+  } finally {
+    if (originalLocation === undefined) {
+      delete global.location
+    } else {
+      global.location = originalLocation
+    }
+    console.error = originalConsoleError
+    global.document = originalDocument
+    global.Image = originalImage
+  }
+})
+
 // Test 9: Relative path normalization test
 await runTest(9, 'Relative path normalization', async () => {
   const images = [
@@ -763,8 +810,8 @@ await runTest(32, 'data-img-resize direct value', async () => {
   assert.strictEqual(img.getAttribute('height'), '300')
 })
 
-// Test 33: preview keeps markdown src and stores final src
-await runTest(33, 'preview keeps markdown src', async () => {
+// Test 33: previewMode markdown keeps markdown src and stores final src
+await runTest(33, 'previewMode markdown keeps markdown src', async () => {
   const images = [
     new MockElement('img', { src: 'cats/cat.jpg', alt: 'cat' })
   ]
@@ -774,7 +821,7 @@ url: https://example.com/page
 urlimage: https://cdn.example.com/assets/
 ---`
 
-  await testSetImageAttributes(images, { preview: true }, markdownWithYaml)
+  await testSetImageAttributes(images, { previewMode: 'markdown' }, markdownWithYaml)
 
   const img = images[0]
   assert.strictEqual(img.getAttribute('src'), 'cats/cat.jpg')
@@ -797,6 +844,35 @@ await runTest(34, 'loadSrcMap overrides loadSrc', async () => {
   )
 
   assert.ok(loadSrcs.includes('blob:cat'))
+})
+
+// Test 35: file:// previewMode local uses lmd display
+await runTest(35, 'file:// previewMode local uses lmd for display', async () => {
+  const images = [
+    new MockElement('img', { src: 'cats/cat.jpg', alt: 'cat' })
+  ]
+  const originalLocation = global.location
+  global.location = { protocol: 'file:' }
+  const markdownWithYaml = `---
+lmd: C:\\Users\\me\\Pictures
+url: https://example.com/page
+urlimage: https://cdn.example.com/assets/
+---`
+
+  try {
+    await testSetImageAttributes(images, { previewMode: 'local' }, markdownWithYaml)
+  } finally {
+    if (originalLocation === undefined) {
+      delete global.location
+    } else {
+      global.location = originalLocation
+    }
+  }
+
+  const img = images[0]
+  const src = img.getAttribute('src')
+  assert.ok(src.startsWith('file:///C:/Users/me/Pictures/'), `Unexpected preview src: ${src}`)
+  assert.strictEqual(img.getAttribute('data-img-output-src'), 'https://cdn.example.com/assets/cats/cat.jpg')
 })
 
 console.log('All tests passed')

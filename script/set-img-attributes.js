@@ -8,6 +8,32 @@ export default async (markdownCont, option) => {
   const hasSpecialScheme = (value) => /^(data|blob|vscode-resource|vscode-webview-resource|vscode-file):/i.test(value)
   const stripQueryHash = (value) => value.split(/[?#]/)[0]
   const escapeForRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const isAbsolutePath = (value) => {
+    if (!value) return false
+    if (value.startsWith('//')) return true
+    if (value.startsWith('/')) return true
+    return /^[A-Za-z]:\//.test(value)
+  }
+  const toFileUrl = (value) => {
+    if (!value) return ''
+    const normalized = String(value).replace(/\\/g, '/')
+    if (!normalized) return ''
+    if (normalized.startsWith('//')) {
+      const without = normalized.replace(/^\/+/, '')
+      if (!without) return 'file:///'
+      const segments = without.split('/')
+      const host = segments.shift() || ''
+      const encodedPath = segments.map((segment) => encodeURIComponent(segment)).join('/')
+      return host ? `file://${host}/${encodedPath}` : 'file:///'
+    }
+    const without = normalized.replace(/^\/+/, '')
+    const segments = without.split('/')
+    const encoded = segments.map((segment, index) => {
+      if (index === 0 && /^[A-Za-z]:$/.test(segment)) return segment
+      return encodeURIComponent(segment)
+    })
+    return `file:///${encoded.join('/')}`
+  }
   const getAttr = (element, name) => {
     const value = element.getAttribute(name)
     return value == null ? '' : value
@@ -76,8 +102,8 @@ export default async (markdownCont, option) => {
     imgSrcPrefix: '', // replace origin of base URL
     urlImageBase: '', // fallback base when frontmatter lacks urlimagebase
     outputUrlMode: 'absolute', // absolute | protocol-relative | path-only
-    preview: false, // show markdown src in preview when available
-    previewOutputSrcAttr: 'data-img-output-src', // store final src when preview is true
+    previewMode: 'output', // output | markdown | local
+    previewOutputSrcAttr: 'data-img-output-src', // store final src when previewMode !== output
     autoHideResizeTitle: true, // remove title when resize hint used
     resizeDataAttr: 'data-img-resize', // store resize hint when title removed
     loadSrcResolver: null, // override loadSrc for size measurement
@@ -139,7 +165,7 @@ export default async (markdownCont, option) => {
     setBool('lazyLoad', rendererSettings.lazyLoad)
     setBool('asyncDecode', rendererSettings.asyncDecode)
     setBool('modifyImgSrc', rendererSettings.modifyImgSrc)
-    setBool('preview', rendererSettings.preview)
+    setString('previewMode', rendererSettings.previewMode)
     setString('imgSrcPrefix', rendererSettings.imgSrcPrefix)
     setString('urlImageBase', rendererSettings.urlImageBase)
     setString('outputUrlMode', rendererSettings.outputUrlMode)
@@ -185,6 +211,9 @@ export default async (markdownCont, option) => {
     }
 
     const currentOpt = { ...opt }
+    const suppressErrorsOverridden = optionOverrides.has('suppressErrors')
+      || (extensionSettings?.rendererImage
+        && Object.prototype.hasOwnProperty.call(extensionSettings.rendererImage, 'suppressErrors'))
     if (extensionSettings) {
       if (extensionSettings.notSetImageElementAttributes || extensionSettings.disableRendererImage) {
         return { skip: true }
@@ -196,6 +225,15 @@ export default async (markdownCont, option) => {
     if (!['none', 'all', 'local', 'remote'].includes(currentOpt.suppressErrors)) {
       console.warn(`[renderer-image(dom)] Invalid suppressErrors value: ${currentOpt.suppressErrors}. Using 'none'.`)
       currentOpt.suppressErrors = 'none'
+    }
+    const isFileProtocol = typeof location !== 'undefined' && location && location.protocol === 'file:'
+    if (!suppressErrorsOverridden && isFileProtocol && currentOpt.suppressErrors === 'none') {
+      currentOpt.suppressErrors = 'local'
+    }
+    const allowedPreviewModes = new Set(['output', 'markdown', 'local'])
+    if (!allowedPreviewModes.has(currentOpt.previewMode)) {
+      console.warn(`[renderer-image(dom)] Invalid previewMode: ${currentOpt.previewMode}. Using 'output'.`)
+      currentOpt.previewMode = 'output'
     }
 
     const resolvedFrontmatter = getFrontmatter(frontmatter, currentOpt) || {}
@@ -210,11 +248,13 @@ export default async (markdownCont, option) => {
       : null
     let adjustedLmd = ''
     if (lmd) {
-      adjustedLmd = lmd.replace(/\\/g, '/')
+      adjustedLmd = String(lmd).replace(/\\/g, '/')
       if (!isProtocolRelativeUrl(adjustedLmd) && !isFileUrl(adjustedLmd) && !hasUrlScheme(adjustedLmd) && !hasSpecialScheme(adjustedLmd)) {
-        adjustedLmd = 'file:///' + adjustedLmd.replace(/^\/+/, '')
+        if (isAbsolutePath(adjustedLmd)) {
+          adjustedLmd = toFileUrl(adjustedLmd)
+        }
       }
-    if (adjustedLmd && !adjustedLmd.endsWith('/')) adjustedLmd += '/'
+      if (adjustedLmd && !adjustedLmd.endsWith('/')) adjustedLmd += '/'
     }
     const resizeDataAttr = typeof currentOpt.resizeDataAttr === 'string' && currentOpt.resizeDataAttr.trim()
       ? currentOpt.resizeDataAttr
@@ -270,13 +310,17 @@ export default async (markdownCont, option) => {
       let src = srcBase
       let finalSrc = srcRaw
       let loadSrc = srcRaw
+      let localDisplaySrc = ''
 
         if (currentOpt.modifyImgSrc) {
           if (isLocalSrc) {
             if (lidPattern) src = src.replace(lidPattern, '')
 
             const localNormalized = normalizeRelativePath(src)
-            if (adjustedLmd) loadSrc = adjustedLmd + localNormalized + srcSuffix
+            if (adjustedLmd) {
+              localDisplaySrc = adjustedLmd + localNormalized + srcSuffix
+              loadSrc = localDisplaySrc
+            }
 
             let nextSrc = localNormalized
             if (imageBase && !localNormalized.startsWith('/')) {
@@ -316,15 +360,21 @@ export default async (markdownCont, option) => {
           }
         }
 
-        let displaySrc = finalSrc
-        if (currentOpt.preview && isLocalSrc) {
-          displaySrc = storedOriginalSrc || srcRaw
-        }
-        if (currentOpt.preview) {
-          if (!storedOriginalSrc && srcRaw) setAttrIfChanged(img, originalSrcAttr, srcRaw)
-          if (outputSrcAttr && finalSrc) setAttrIfChanged(img, outputSrcAttr, finalSrc)
-        }
-        setAttrIfChanged(img, 'src', displaySrc)
+      let displaySrc = finalSrc
+      if (currentOpt.previewMode === 'markdown' && isLocalSrc) {
+        displaySrc = storedOriginalSrc || srcRaw
+      }
+      if (currentOpt.previewMode === 'local' && isLocalSrc) {
+        displaySrc = localDisplaySrc || storedOriginalSrc || srcRaw
+      }
+      if (currentOpt.previewMode !== 'output') {
+        if (!storedOriginalSrc && srcRaw) setAttrIfChanged(img, originalSrcAttr, srcRaw)
+        if (outputSrcAttr && finalSrc) setAttrIfChanged(img, outputSrcAttr, finalSrc)
+      } else {
+        removeAttrIfPresent(img, originalSrcAttr)
+        if (outputSrcAttr) removeAttrIfPresent(img, outputSrcAttr)
+      }
+      setAttrIfChanged(img, 'src', displaySrc)
 
       const alt = img.alt
       if (alt) setAttrIfChanged(img, 'alt', alt)
