@@ -112,10 +112,12 @@ urlimage: https://cdn.example.com/assets/
       }
 
       const lmd = new URL('./', window.location.href).href
-      let setImgAttributes = null
+      let createContext = null
+      let applyImageTransforms = null
       try {
         const mod = await import('../script/set-img-attributes.js')
-        setImgAttributes = mod.default
+        createContext = mod.createContext
+        applyImageTransforms = mod.applyImageTransforms
       } catch (error) {
         finalEl.textContent = 'Module load error: ' + error.message
       }
@@ -131,11 +133,12 @@ urlimage: https://cdn.example.com/assets/
         renderedEl.textContent = renderedHtml.trim()
         previewRoot.innerHTML = renderedHtml
 
-        if (setImgAttributes) {
-          await setImgAttributes(markdownCont, {
+        if (createContext && applyImageTransforms) {
+          const context = await createContext(markdownCont, {
             resize: true,
-            preview: true,
-          })
+            previewMode: 'local',
+          }, previewRoot)
+          await applyImageTransforms(previewRoot, context, markdownCont)
         }
 
         if (token !== renderToken) return
@@ -150,26 +153,26 @@ urlimage: https://cdn.example.com/assets/
       }
 
       markdownEl.addEventListener('input', () => {
-        if (!setImgAttributes) return
+        if (!createContext || !applyImageTransforms) return
         const markdownCont = markdownEl.value
         const renderedHtml = renderMarkdown(markdownCont)
         renderedEl.textContent = renderedHtml.trim()
         previewRoot.innerHTML = renderedHtml
-        setImgAttributes(markdownCont, {
-          resize: true,
-          preview: true,
-        }).then(() => {
-          const clone = previewRoot.cloneNode(true)
-          clone.querySelectorAll('img').forEach((img) => {
-            const finalSrc = img.getAttribute('data-img-output-src')
-            if (finalSrc) img.setAttribute('src', finalSrc)
-            img.removeAttribute('data-img-output-src')
-            img.removeAttribute('data-img-src-raw')
+        createContext(markdownCont, { resize: true, previewMode: 'local' }, previewRoot)
+          .then((context) => applyImageTransforms(previewRoot, context, markdownCont))
+          .then(() => {
+            const clone = previewRoot.cloneNode(true)
+            clone.querySelectorAll('img').forEach((img) => {
+              const finalSrc = img.getAttribute('data-img-output-src')
+              if (finalSrc) img.setAttribute('src', finalSrc)
+              img.removeAttribute('data-img-output-src')
+              img.removeAttribute('data-img-src-raw')
+            })
+            finalEl.textContent = clone.innerHTML.trim()
           })
-          finalEl.textContent = clone.innerHTML.trim()
-        }).catch((error) => {
-          finalEl.textContent = 'Render error: ' + error.message
-        })
+          .catch((error) => {
+            finalEl.textContent = 'Render error: ' + error.message
+          })
       })
 
       renderAll().catch((error) => {
