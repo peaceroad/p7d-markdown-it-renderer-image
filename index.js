@@ -2,38 +2,28 @@ import path from 'path'
 import { fileURLToPath } from 'url'
 import fetch from 'sync-fetch'
 import imageSize from 'image-size'
-import { setImgSize, getFrontmatter, normalizeRelativePath, resolveImageBase, normalizeResizeValue } from './script/img-util.js'
+import {
+  setImgSize,
+  getFrontmatter,
+  normalizeRelativePath,
+  resolveImageBase,
+  normalizeResizeValue,
+  normalizeExtensions,
+  isHttpUrl,
+  isProtocolRelativeUrl,
+  isFileUrl,
+  hasSpecialScheme,
+  stripQueryHash,
+  getBasename,
+  applyOutputUrlMode,
+  safeDecodeUri,
+} from './script/img-util.js'
 
 const tokensState = new WeakMap()
 const globalFailedImgLoads = new Set()
 const globalMissingMdPathWarnings = new Set()
 
-const isHttpUrl = (value) => /^https?:\/\//i.test(value)
-const isProtocolRelativeUrl = (value) => /^\/\//.test(value)
-const isFileUrl = (value) => /^file:\/\//i.test(value)
-const hasSpecialScheme = (value) => /^(data|blob|vscode-resource|vscode-webview-resource|vscode-file):/i.test(value)
 const toAbsoluteRemote = (value) => (isProtocolRelativeUrl(value) ? `https:${value}` : value)
-const stripQueryHash = (value) => value.split(/[?#]/)[0]
-const escapeForRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-const normalizeExtensions = (value) => (value || '')
-  .split(',')
-  .map((ext) => ext.trim().replace(/^\.+/, ''))
-  .filter(Boolean)
-  .map(escapeForRegExp)
-const hasPercentEncoded = (value) => /%[0-9A-Fa-f]{2}/.test(value)
-const decodePath = (value) => {
-  if (!value || !hasPercentEncoded(value)) return value
-  try {
-    return decodeURI(value)
-  } catch {
-    return value
-  }
-}
-const getBasename = (value) => {
-  const clean = stripQueryHash(value || '')
-  const lastSlashIndex = Math.max(clean.lastIndexOf('/'), clean.lastIndexOf('\\'))
-  return clean.substring(lastSlashIndex + 1)
-}
 const setCache = (cache, key, value, maxEntries) => {
   if (maxEntries === 0) return
   cache.set(key, value)
@@ -62,9 +52,9 @@ const getLocalImgSrc = (imgSrc, opt, env) => {
   }
   if (dirPath === '') return ''
   const cleanSrc = stripQueryHash(imgSrc)
-  const decodedSrc = decodePath(cleanSrc)
-  const finalSrc = decodedSrc === cleanSrc ? cleanSrc : decodedSrc
-  return path.resolve(dirPath, finalSrc.replace(/[/\\]/g, path.sep))
+    const decodedSrc = safeDecodeUri(cleanSrc)
+    const finalSrc = decodedSrc === cleanSrc ? cleanSrc : decodedSrc
+    return path.resolve(dirPath, finalSrc.replace(/[/\\]/g, path.sep))
 }
 
 const getImgData = (src, isRemote, timeout, cache, cacheMax, failedSet, suppressLoadErrors, suppressLocalErrors, suppressRemoteErrors, remoteMaxBytes) => {
@@ -102,32 +92,6 @@ const getImgData = (src, isRemote, timeout, cache, cacheMax, failedSet, suppress
   }
 }
 
-const decodeSrc = (value) => {
-  try {
-    return decodeURI(value)
-  } catch {
-    return value
-  }
-}
-
-const applyOutputUrlMode = (value, mode) => {
-  if (!value || !mode || mode === 'absolute') return value
-  if (mode === 'protocol-relative') {
-    return value.replace(/^https?:\/\//i, '//')
-  }
-  if (mode === 'path-only') {
-    if (value.startsWith('//') || /^https?:\/\//i.test(value)) {
-      const target = value.startsWith('//') ? `https:${value}` : value
-      try {
-        const parsed = new URL(target)
-        return `${parsed.pathname}${parsed.search}${parsed.hash}`
-      } catch {
-        return value
-      }
-    }
-  }
-  return value
-}
 
 const mditRendererImage = (md, option) => {
   const opt = {
@@ -137,8 +101,7 @@ const mditRendererImage = (md, option) => {
     resize: false, // resize by title hint
     asyncDecode: false, // add decoding="async"
     checkImgExtensions: 'png,jpg,jpeg,gif,webp', // size only these extensions
-    modifyImgSrc: true, // rewrite src using frontmatter when available
-    imgSrcPrefix: '', // replace origin of base URL
+    resolveSrc: true, // resolve final src using frontmatter when available
     urlImageBase: '', // fallback base when frontmatter lacks urlimagebase
     outputUrlMode: 'absolute', // absolute | protocol-relative | path-only
     autoHideResizeTitle: true, // remove title when resize hint used
@@ -208,12 +171,12 @@ const mditRendererImage = (md, option) => {
         url: parsedFrontmatter.url,
         urlimage: parsedFrontmatter.urlimage,
         urlimagebase: parsedFrontmatter.urlimagebase || opt.urlImageBase,
-      }, opt)
+      })
       state.imageScale = parsedFrontmatter.imageScale
     }
     const parsedFrontmatter = shouldParseFrontmatter ? (state.resolvedFrontmatter || {}) : {}
     const imageScale = shouldParseFrontmatter ? state.imageScale : null
-    if (opt.modifyImgSrc && src && (hasFrontmatter || opt.urlImageBase)) {
+    if (opt.resolveSrc && src && (hasFrontmatter || opt.urlImageBase)) {
       const { lid, imageDir, hasImageDir } = parsedFrontmatter
       const imageBase = state.imageBase || ''
 
@@ -241,7 +204,7 @@ const mditRendererImage = (md, option) => {
       token.attrSet('src', src)
     }
 
-    let finalSrc = decodeSrc(token.attrGet('src') || (src + srcSuffix))
+    let finalSrc = safeDecodeUri(token.attrGet('src') || (src + srcSuffix))
     finalSrc = applyOutputUrlMode(finalSrc, opt.outputUrlMode)
 
     const isValidExt = imgExtReg.test(srcRaw)
