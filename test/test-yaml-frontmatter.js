@@ -13,40 +13,32 @@ if (isWindows) {
 }
 
 
-const md = mdit().use(mditRendererImage, {scaleSuffix: true, resize: true});
+const md = mdit().use(mditRendererImage, { scaleSuffix: true, resize: true })
 
 let mdMeta = mdit().use(mditMeta).use(mditRendererImage, {
-  modifyImgSrc: true,
+  resolveSrc: true,
   scaleSuffix: true,
   resize: true,
   mdPath: __dirname + path.sep + 'examples-yaml-frontmatter.md',
 })
 
 
-let mdMetaWithImgSrcPrefix = mdit().use(mditMeta).use(mditRendererImage, {
-  modifyImgSrc: true,
-  scaleSuffix: true,
-  resize: true,
-  mdPath: __dirname + path.sep + 'examples-yaml-frontmatter-with-imgSrcPrefix.md',
-  imgSrcPrefix: 'https://example.com/assets/images/',
-})
-
 let mdMetaWithLidRelative = mdit().use(mditMeta).use(mditRendererImage, {
-  modifyImgSrc: true,
+  resolveSrc: true,
   scaleSuffix: true,
   resize: true,
   mdPath: __dirname + path.sep + 'examples-yaml-frontmatter-with-lidRelative.md',
 })
 
 let mdFrontmatter = mdit().use(mditRendererImage, {
-  modifyImgSrc: true,
+  resolveSrc: true,
   disableRemoteSize: true,
   suppressErrors: 'local',
   mdPath: __dirname + path.sep + 'examples-yaml-frontmatter.md',
 })
 
 let mdOptionBase = mdit().use(mditRendererImage, {
-  modifyImgSrc: true,
+  resolveSrc: true,
   disableRemoteSize: true,
   suppressErrors: 'local',
   urlImageBase: 'https://image.example.com/assets/',
@@ -54,7 +46,7 @@ let mdOptionBase = mdit().use(mditRendererImage, {
 })
 
 let mdProtocolRelative = mdit().use(mditRendererImage, {
-  modifyImgSrc: true,
+  resolveSrc: true,
   disableRemoteSize: true,
   suppressErrors: 'local',
   outputUrlMode: 'protocol-relative',
@@ -62,7 +54,7 @@ let mdProtocolRelative = mdit().use(mditRendererImage, {
 })
 
 let mdPathOnly = mdit().use(mditRendererImage, {
-  modifyImgSrc: true,
+  resolveSrc: true,
   disableRemoteSize: true,
   suppressErrors: 'local',
   outputUrlMode: 'path-only',
@@ -71,7 +63,6 @@ let mdPathOnly = mdit().use(mditRendererImage, {
 
 const testData = {
   noOption: __dirname + path.sep +  'examples-yaml-frontmatter.txt',
-  withImgSrcPrefix: __dirname + path.sep + 'examples-yaml-frontmatter-with-imgSrcPrefix.txt',
   withLidRelative: __dirname + path.sep + 'examples-yaml-frontmatter-with-lidRelative.txt',
 }
 
@@ -157,7 +148,6 @@ const runTest = (mdInstance, pat, pass, testId) => {
 
 let pass = true
 pass = runTest(mdMeta, testData.noOption, pass)
-pass = runTest(mdMetaWithImgSrcPrefix, testData.withImgSrcPrefix, pass)
 pass = runTest(mdMetaWithLidRelative, testData.withLidRelative, pass)
 
 console.log('===========================================================')
@@ -181,24 +171,6 @@ try {
   }
   const hUrlImageBase = mdFrontmatter.render('![Alt](foo/bar/cat.jpg)', envUrlImageBase)
   assert.strictEqual(hUrlImageBase, '<p><img src="https://image.example.com/assets/page/2025/cat.jpg" alt="Alt"></p>\n')
-
-  const envUrlImageBaseAlias = {
-    frontmatter: {
-      url: 'https://example.com/page',
-      urlImageBase: 'https://image.example.com/assets/',
-    },
-  }
-  const hUrlImageBaseAlias = mdFrontmatter.render('![Alt](cat.jpg)', envUrlImageBaseAlias)
-  assert.strictEqual(hUrlImageBaseAlias, '<p><img src="https://image.example.com/assets/page/cat.jpg" alt="Alt" width="400" height="300"></p>\n')
-
-  const envUrlImageAlias = {
-    frontmatter: {
-      url: 'https://example.com/page',
-      urlImage: 'https://image.example.com/assets/',
-    },
-  }
-  const hUrlImageAlias = mdFrontmatter.render('![Alt](cat.jpg)', envUrlImageAlias)
-  assert.strictEqual(hUrlImageAlias, '<p><img src="https://image.example.com/assets/cat.jpg" alt="Alt" width="400" height="300"></p>\n')
 
   const envUrlImageBaseHtml = {
     frontmatter: {

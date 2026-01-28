@@ -66,7 +66,7 @@ url: https://example.com/article/
 
   try {
     await setImageAttributes(markdownContent, {
-      modifyImgSrc: true,
+      resolveSrc: true,
       scaleSuffix: true
     })
     

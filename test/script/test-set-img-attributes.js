@@ -82,7 +82,7 @@ const createMockDocument = (images, metaTag = null) => {
 }
 
 // Helper function to test setImageAttributes in mock environment
-const testSetImageAttributes = async (images, options = {}, markdownContent = null, metaContent = null, captureLoadSrc = null) => {
+const testSetImageAttributes = async (images, options = {}, markdownContent = null, metaContent = null, captureLoadSrc = null, returnSummary = false) => {
   // Mock global document and Image
   const originalDocument = global.document
   const originalImage = global.Image
@@ -137,12 +137,11 @@ const testSetImageAttributes = async (images, options = {}, markdownContent = nu
     // Dynamic import setImageAttributes (after mocking)
     const scriptPath = path.resolve(__dirname, '../../script/set-img-attributes.js')
     const scriptUrl = new URL(`file:///${scriptPath.replace(/\\/g, '/')}`).href
-    const setImageAttributes = (await import(scriptUrl)).default
+    const mod = await import(scriptUrl)
+    const context = await mod.createContext(markdownContent, { autoHideResizeTitle: false, ...options }, global.document)
+    const summary = await mod.applyImageTransforms(global.document, context)
     
-    // Use legacy API: (markdownCont, option)
-    await setImageAttributes(markdownContent, { autoHideResizeTitle: false, ...options })
-    
-    return images
+    return returnSummary ? { images, summary } : images
   } finally {
     // Restore globals
     global.document = originalDocument
@@ -228,23 +227,6 @@ await runTest(3, 'Multiple image processing', async () => {
   })
 })
 
-// Test 4: imgSrcPrefix option test
-await runTest(4, 'ImgSrcPrefix option test', async () => {
-  const images = [
-    new MockElement('img', { src: 'test.jpg', alt: 'test' })
-  ]
-  
-  await testSetImageAttributes(images, {
-    imgSrcPrefix: '/static/images/'
-  })
-  
-  const img = images[0]
-  const finalSrc = img.getAttribute('src')
-  console.log('Actual src:', finalSrc)
-  // imgSrcPrefix alone doesn't modify src without frontmatter
-  assert.strictEqual(finalSrc, 'test.jpg')
-})
-
 // Test 5: metadata-based path processing
 await runTest(5, 'Metadata-based path processing', async () => {
   const images = [
@@ -266,7 +248,7 @@ Some markdown content here.`
   
   const img = images[0]
   const finalSrc = img.getAttribute('src')
-  // The exact result depends on how modifyImgSrc processes the path
+  // The exact result depends on how resolveSrc processes the path
   assert.ok(finalSrc.includes('test.jpg'))
 })
 
@@ -333,11 +315,9 @@ await runTest(8, 'Error handling', async () => {
   try {
     const scriptPath = path.resolve(__dirname, '../../script/set-img-attributes.js')
     const scriptUrl = new URL(`file:///${scriptPath.replace(/\\/g, '/')}`).href
-    const setImageAttributes = (await import(scriptUrl)).default
-    await setImageAttributes('', {
-      lazyLoad: true,
-      asyncDecode: true
-    })
+    const mod = await import(scriptUrl)
+    const context = await mod.createContext('', { autoHideResizeTitle: false, lazyLoad: true, asyncDecode: true }, global.document)
+    await mod.applyImageTransforms(global.document, context)
     
     const img = images[0]
     // Even if an error occurs, lazyLoad and asyncDecode are still set
@@ -385,8 +365,9 @@ await runTest(8.5, 'file:// auto suppresses local errors', async () => {
   try {
     const scriptPath = path.resolve(__dirname, '../../script/set-img-attributes.js')
     const scriptUrl = new URL(`file:///${scriptPath.replace(/\\/g, '/')}`).href
-    const setImageAttributes = (await import(scriptUrl)).default
-    await setImageAttributes('', {})
+    const mod = await import(scriptUrl)
+    const context = await mod.createContext('', {}, global.document)
+    await mod.applyImageTransforms(global.document, context)
     assert.strictEqual(errorCount, 0)
   } finally {
     if (originalLocation === undefined) {
@@ -649,38 +630,6 @@ urlimage: 2025
   assert.strictEqual(img.getAttribute('src'), 'https://example.com/page/2025/cat.jpg')
 })
 
-// Test 22: urlImageBase alias applies base with url path
-await runTest(22, 'urlImageBase alias applies base', async () => {
-  const images = [
-    new MockElement('img', { src: 'cat.jpg', alt: 'cat' })
-  ]
-  const markdownWithYaml = `---
-url: https://example.com/page
-urlImageBase: https://image.example.com/assets/
----`
-
-  await testSetImageAttributes(images, {}, markdownWithYaml)
-
-  const img = images[0]
-  assert.strictEqual(img.getAttribute('src'), 'https://image.example.com/assets/page/cat.jpg')
-})
-
-// Test 23: urlImage alias applies base
-await runTest(23, 'urlImage alias applies base', async () => {
-  const images = [
-    new MockElement('img', { src: 'cat.jpg', alt: 'cat' })
-  ]
-  const markdownWithYaml = `---
-url: https://example.com/page
-urlImage: https://image.example.com/assets/
----`
-
-  await testSetImageAttributes(images, {}, markdownWithYaml)
-
-  const img = images[0]
-  assert.strictEqual(img.getAttribute('src'), 'https://image.example.com/assets/cat.jpg')
-})
-
 // Test 24: outputUrlMode protocol-relative
 await runTest(24, 'outputUrlMode protocol-relative', async () => {
   const images = [
@@ -873,6 +822,48 @@ urlimage: https://cdn.example.com/assets/
   const src = img.getAttribute('src')
   assert.ok(src.startsWith('file:///C:/Users/me/Pictures/'), `Unexpected preview src: ${src}`)
   assert.strictEqual(img.getAttribute('data-img-output-src'), 'https://cdn.example.com/assets/cats/cat.jpg')
+})
+
+// Test 36: setDomSrc false keeps original src
+await runTest(36, 'setDomSrc false keeps src', async () => {
+  const images = [
+    new MockElement('img', { src: 'cat.jpg', alt: 'cat' })
+  ]
+  const markdownWithYaml = `---
+url: https://example.com/page
+urlimage: https://cdn.example.com/assets/
+---`
+
+  const result = await testSetImageAttributes(
+    images,
+    { setDomSrc: false, resize: true },
+    markdownWithYaml,
+    null,
+    null,
+    true
+  )
+
+  const img = result.images[0]
+  assert.strictEqual(img.getAttribute('src'), 'cat.jpg')
+  assert.ok(img.getAttribute('width'))
+  assert.ok(img.getAttribute('height'))
+})
+
+// Test 37: awaitSizeProbes false leaves pending tasks
+await runTest(37, 'awaitSizeProbes false leaves pending', async () => {
+  const images = [
+    new MockElement('img', { src: 'cat.jpg', alt: 'cat' })
+  ]
+  const result = await testSetImageAttributes(
+    images,
+    { awaitSizeProbes: false, loadSrcMap: { 'cat.jpg': 'blob:cat' } },
+    null,
+    null,
+    null,
+    true
+  )
+
+  assert.ok(result.summary.pending >= 1)
 })
 
 console.log('All tests passed')
