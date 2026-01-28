@@ -8,11 +8,34 @@ const toText = (value) => {
   if (value instanceof String) return value.valueOf()
   return ''
 }
+const hasPercentEncoded = (value) => /%[0-9A-Fa-f]{2}/.test(value)
+const safeDecodeUri = (value) => {
+  const text = toText(value)
+  if (!text) return ''
+  if (!hasPercentEncoded(text)) return text
+  if (/%2f|%5c/i.test(text)) return text
+  try {
+    return decodeURI(text)
+  } catch {
+    return text
+  }
+}
 const stripQueryHash = (value) => {
   const text = toText(value)
   if (!text) return ''
   return text.split(/[?#]/)[0]
 }
+const escapeForRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+const normalizeExtensions = (value) => (value || '')
+  .split(',')
+  .map((ext) => ext.trim().replace(/^\.+/, ''))
+  .filter(Boolean)
+  .map(escapeForRegExp)
+const isHttpUrl = (value) => /^https?:\/\//i.test(toText(value))
+const isProtocolRelativeUrl = (value) => /^\/\//.test(toText(value))
+const isFileUrl = (value) => /^file:\/\//i.test(toText(value))
+const hasUrlScheme = (value) => /^[a-z][a-z0-9+.-]*:\/\//i.test(toText(value))
+const hasSpecialScheme = (value) => /^(data|blob|vscode-resource|vscode-webview-resource|vscode-file):/i.test(toText(value))
 const isAbsoluteUrl = (value) => {
   const text = toText(value)
   if (!text) return false
@@ -65,15 +88,6 @@ const ensureTrailingSlash = (value) => {
   return text.endsWith('/') ? text : text + '/'
 }
 
-const applyImgSrcPrefix = (value, imgSrcPrefix) => {
-  const text = toText(value)
-  const prefixText = toText(imgSrcPrefix)
-  if (!text || !prefixText) return text
-  let prefix = prefixText
-  if (!prefix.endsWith('/')) prefix += '/'
-  return text.replace(/^https?:\/\/.*?\//, prefix)
-}
-
 const getUrlPath = (value) => {
   const text = toText(value)
   if (!text) return ''
@@ -103,6 +117,24 @@ const joinUrl = (base, path) => {
   const baseWithSlash = ensureTrailingSlash(baseText)
   if (!pathText) return baseWithSlash
   return baseWithSlash + pathText.replace(/^\/+/, '')
+}
+
+const getBasename = (value) => {
+  const decoded = safeDecodeUri(value)
+  const clean = stripQueryHash(decoded)
+  const lastSlashIndex = Math.max(clean.lastIndexOf('/'), clean.lastIndexOf('\\'))
+  return clean.substring(lastSlashIndex + 1)
+}
+
+const getImageName = (value) => {
+  const decoded = safeDecodeUri(value)
+  const cleanSrc = stripQueryHash(decoded)
+  const lastDotIndex = cleanSrc.lastIndexOf('.')
+  const lastSlashIndex = Math.max(cleanSrc.lastIndexOf('/'), cleanSrc.lastIndexOf('\\'))
+  if (lastDotIndex > lastSlashIndex) {
+    return cleanSrc.substring(lastSlashIndex + 1, lastDotIndex)
+  }
+  return cleanSrc.substring(lastSlashIndex + 1)
 }
 
 const parseFrontmatter = (markdownCont) => {
@@ -232,11 +264,7 @@ const getFrontmatter = (frontmatter, opt) => {
     if (!url.endsWith('/')) url += '/'
   }
   const hasUrlImageKey = Object.prototype.hasOwnProperty.call(frontmatter, 'urlimage')
-    || Object.prototype.hasOwnProperty.call(frontmatter, 'urlImage')
   let urlimage = toText(frontmatter.urlimage)
-  if (!urlimage) {
-    urlimage = toText(frontmatter.urlImage)
-  }
   let imageDir = ''
   let hasImageDir = false
   const urlimageIsAbsolute = urlimage ? isAbsoluteUrl(urlimage) : false
@@ -248,9 +276,6 @@ const getFrontmatter = (frontmatter, opt) => {
     urlimage = ''
   }
   let urlimagebase = toText(frontmatter.urlimagebase)
-  if (!urlimagebase) {
-    urlimagebase = toText(frontmatter.urlImageBase)
-  }
   if (urlimagebase) {
     if (!urlimagebase.endsWith('/')) urlimagebase += '/'
   }
@@ -264,11 +289,11 @@ const getFrontmatter = (frontmatter, opt) => {
   if (lmd) {
     if (!/\/$/.test(lmd)) lmd += '/'
   }
-  const imageScale = parseImageScale(frontmatter.imagescale ?? frontmatter.imageScale)
+  const imageScale = parseImageScale(frontmatter.imagescale)
   return { url, urlimage, urlimagebase, lid, imageDir, hasImageDir, lmd, imageScale }
 }
 
-const resolveImageBase = (frontmatter, opt) => {
+const resolveImageBase = (frontmatter) => {
   if (!frontmatter) return ''
   const url = frontmatter.url || ''
   const urlimage = frontmatter.urlimage || ''
@@ -282,16 +307,43 @@ const resolveImageBase = (frontmatter, opt) => {
   } else if (url) {
     base = url
   }
-  base = ensureTrailingSlash(base)
-  if (opt && opt.imgSrcPrefix) {
-    base = applyImgSrcPrefix(base, opt.imgSrcPrefix)
+  return ensureTrailingSlash(base)
+}
+
+const applyOutputUrlMode = (value, mode) => {
+  const text = toText(value)
+  if (!text || !mode || mode === 'absolute') return text
+  if (mode === 'protocol-relative') {
+    return text.replace(/^https?:\/\//i, '//')
   }
-  return base
+  if (mode === 'path-only') {
+    if (text.startsWith('//') || /^https?:\/\//i.test(text)) {
+      const target = text.startsWith('//') ? `https:${text}` : text
+      try {
+        const parsed = new URL(target)
+        return `${parsed.pathname}${parsed.search}${parsed.hash}`
+      } catch {
+        return text
+      }
+    }
+  }
+  return text
 }
 
 export {
   scaleSuffixReg, resizeReg, resizeValueReg,
   normalizeResizeValue,
+  safeDecodeUri,
+  stripQueryHash,
+  normalizeExtensions,
+  isHttpUrl,
+  isProtocolRelativeUrl,
+  isFileUrl,
+  hasUrlScheme,
+  hasSpecialScheme,
+  getBasename,
+  getImageName,
+  applyOutputUrlMode,
   parseFrontmatter, setImgSize, getFrontmatter,
   normalizeRelativePath, resolveImageBase,
 }
