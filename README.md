@@ -1,8 +1,8 @@
 # p7d-markdown-it-renderer-image
 
-A markdown-it plugin plus a browser DOM helper to set `img` attributes (width/height, loading, decoding) and optionally rewrite `src` using frontmatter.
+A markdown-it plugin plus a browser DOM helper to set `img` attributes (width/height, loading, decoding) and optionally resolve `src` using frontmatter.
 
-## Use
+## Quick start
 
 ### Node usage (markdown-it)
 
@@ -21,28 +21,13 @@ console.log(md.render(mdCont))
 You can also pass `mdPath` via the render env:
 
 ```js
-import fs from 'fs'
-import mdit from 'markdown-it'
-import mditRendererImage from '@peaceroad/markdown-it-renderer-image'
-
-const mdFile = '/tmp/markdown.md'
 const md = mdit().use(mditRendererImage)
-const mdCont = fs.readFileSync(mdFile, 'utf-8')
-
 console.log(md.render(mdCont, { mdPath: mdFile }))
 ```
 
 Frontmatter-based rewriting on Node:
 
 ```js
-import fs from 'fs'
-import mdit from 'markdown-it'
-import mditRendererImage from '@peaceroad/markdown-it-renderer-image'
-
-const mdFile = '/tmp/markdown.md'
-const md = mdit().use(mditRendererImage)
-const mdCont = fs.readFileSync(mdFile, 'utf-8')
-
 const frontmatter = { url: 'https://example.com/page' }
 const html = md.render(mdCont, { mdPath: mdFile, frontmatter })
 console.log(html)
@@ -52,34 +37,51 @@ console.log(html)
 
 ```html
 <script type="module">
-import setImgAttributes from '<package>/script/set-img-attributes.js'
+import { createContext, applyImageTransforms, startObserver } from '<package>/script/set-img-attributes.js'
 
-await setImgAttributes(markdownCont, {
+const context = await createContext(markdownCont, {
   readMeta: true, // read frontmatter from <meta>
-  observe: true,  // watch DOM mutations
 })
+
+// Apply once
+await applyImageTransforms(document, context)
+
+// Or observe mutations
+startObserver(document, context)
 </script>
 ```
 
-`setImgAttributes` reads YAML frontmatter from the first argument (markdown text). Pass `null`/`''` if you want to skip YAML parsing and rely on `readMeta` (JSON stored in `meta[name="markdown-frontmatter"]`).
-
-Bundlers can import the same entry point. The DOM script relies on `./img-util.js`, so bundle it or make sure the import base URL resolves correctly.
+Notes:
+- The DOM helper exports **named functions only** (no default export).
+- `createContext` reads YAML frontmatter from the first argument (markdown text). Pass `null`/`''` to skip YAML parsing and rely on `readMeta` (JSON in `meta[name="markdown-frontmatter"]`).
+- The DOM script dynamically imports `./img-util.js`; bundle it or ensure the base URL resolves correctly.
 
 Example (bundler or app code that rerenders HTML):
 
 ```js
-import setImgAttributes from '@peaceroad/markdown-it-renderer-image/script/set-img-attributes.js'
+import { createContext, applyImageTransforms } from '@peaceroad/markdown-it-renderer-image/script/set-img-attributes.js'
 
 txt.addEventListener('input', async () => {
   const markdownCont = txt.value
   html.innerHTML = renderedHtml
 
-  await setImgAttributes(markdownCont, {
-    readMeta: true,
-    observe: true,
-  })
+  const context = await createContext(markdownCont, { readMeta: true }, html)
+  await applyImageTransforms(html, context, markdownCont)
 })
 ```
+
+### Node vs DOM parity
+
+To make Node and DOM results match (final `src` + `width/height`):
+
+- DOM: `previewMode: 'output'` and `setDomSrc: true`
+- Node: `resolveSrc: true`
+
+Intentional differences:
+
+- DOM: `previewMode` can separate display `src` from final output URL (Node has no equivalent).
+- DOM: `setDomSrc: false` can skip DOM `src` rewriting while still sizing (Node has no equivalent).
+- Node: `mdPath`, `disableRemoteSize`, `remoteTimeout` control local/remote sizing (DOM has no equivalent).
 
 ## Options (summary)
 
@@ -92,7 +94,7 @@ txt.addEventListener('input', async () => {
 - `lazyLoad` (false): add `loading="lazy"`.
 - `asyncDecode` (false): add `decoding="async"`.
 - `checkImgExtensions` (`png,jpg,jpeg,gif,webp`): extensions to size.
-- `modifyImgSrc` (true): enable frontmatter-based `src` rewriting (no-op without frontmatter or `urlImageBase`).
+- `resolveSrc` (true): resolve final `src` using frontmatter (no-op without frontmatter or `urlImageBase`).
 - `mdPath` (empty): markdown file path for local sizing.
 - `disableRemoteSize` (false): skip remote sizing.
 - `remoteTimeout` (5000): sync fetch timeout in ms.
@@ -107,7 +109,6 @@ txt.addEventListener('input', async () => {
 Same as Node options except remote sizing options, plus:
 
 - `readMeta` (false): read `meta[name="markdown-frontmatter"]` (JSON).
-- `observe` (false): watch DOM mutations and re-run processing.
 - `previewMode` (`output`): `output` | `markdown` | `local`.
   - `output`: display final URL (default).
   - `markdown`: display the original markdown `src` (best for drag & drop/blob mapping).
@@ -115,26 +116,29 @@ Same as Node options except remote sizing options, plus:
 - `previewOutputSrcAttr` (`data-img-output-src`): attribute name to store the final URL when `previewMode !== output` (set `''` to disable).
 - `loadSrcResolver` (null): function to override the measurement source (`loadSrc`) for size calculation (DOM only).
 - `loadSrcMap` (null): map of `src` -> `loadSrc` overrides for size calculation (DOM only).
+- `setDomSrc` (true): when false, leaves `img.src` untouched (size probing still runs).
+- `awaitSizeProbes` (true): wait for image load before resolving `applyImageTransforms`.
+- `sizeProbeTimeoutMs` (3000): timeout for size probes (0 disables).
+- `onImageProcessed` (null): per-image callback `(imgEl, info) => {}`.
 
-`readMeta`/`observe` are opt-in to avoid extra DOM work in normal pages; enable them for live preview scenarios (e.g., VS Code).
-When running a page from `file://`, the DOM script defaults `suppressErrors` to `local` unless you explicitly set `suppressErrors`, to reduce noisy console errors from local image probes.
+`readMeta` is opt-in to avoid extra DOM work in normal pages; enable it for live preview scenarios (e.g., VS Code). When running a page from `file://`, the DOM script defaults `suppressErrors` to `local` unless you explicitly set `suppressErrors`, to reduce noisy console errors from local image probes.
 
 ## Options (details)
 
-### Modify output image `src` attribute from frontmatter or options
+### Resolve output image `src` from frontmatter or options
 
-When `modifyImgSrc: true` (default), image `src` is rewritten using frontmatter keys.
+When `resolveSrc: true` (default), image `src` is resolved using frontmatter keys.
 
-Frontmatter is used only when `modifyImgSrc: true`. If frontmatter (and `urlImageBase`) is missing, `src` is left untouched.
+Frontmatter is used only when `resolveSrc: true`. If frontmatter (and `urlImageBase`) is missing, `src` is left untouched.
 
-Frontmatter keys:
+Frontmatter keys (lowercase only):
 
 - `url`: page base URL.
-- `urlimage`: image base URL (absolute) or image directory (relative/empty). alias: `urlImage`.
-- `urlimagebase`: base URL used with the path from `url`. alias: `urlImageBase`.
+- `urlimage`: image base URL (absolute) or image directory (relative/empty).
+- `urlimagebase`: base URL used with the path from `url`.
 - `lid`: local image directory prefix to strip from relative `src` so the remaining subpath can be reused in the final URL.
 - `lmd`: local media directory for DOM size loading. If it is an absolute path without a scheme, it is converted to a `file:///` URL with encoded segments; relative paths are kept as-is.
-- `imagescale`: scale factor applied to all images (e.g. `60%` or `0.6`, values above 100% are capped). alias: `imageScale`.
+- `imagescale`: scale factor applied to all images (e.g. `60%` or `0.6`, values above 100% are capped).
 
 Base selection order:
 
@@ -202,7 +206,7 @@ imagescale: 60%
 Example: 400x300 image with `@2x`, title `resize:50%`, and `imagescale: 0.5`
 -> 400x300 -> 200x150 -> 100x75 (imagescale skipped)
 
-#### Local sizing in DOM (`lmd`)
+### Local sizing in DOM (`lmd`)
 
 In browsers, local file access is restricted. For local sizing in the DOM script, provide `lmd` (local markdown directory) as a path or a Webview URI:
 
@@ -214,7 +218,7 @@ lmd: C:\Users\User\Documents\manuscript
 
 In VS Code, pass a Webview URI (e.g., `asWebviewUri`) instead of a raw `file://` path.
 
-#### Preview local src in DOM
+### Preview modes in DOM
 
 When `previewMode` is `markdown` or `local`, the DOM script stores the final URL in `previewOutputSrcAttr` (default `data-img-output-src`) so you can copy/export HTML with the CDN URL. The original markdown `src` is cached in `data-img-src-raw` to keep reprocessing stable; `lmd` is still used for size measurement when available. In VS Code Webview, relative `src` may not resolve, so use `previewMode: 'output'` there.
 
@@ -226,7 +230,7 @@ Only `.html`, `.htm`, `.xhtml` are treated as file names when deriving the path 
 - `url: https://example.com/page/index.html` -> `/page/`
 - `url: https://example.com/v1.2/` -> `/v1.2/`
 
-#### `outputUrlMode`
+### `outputUrlMode`
 
 Applied at the end:
 
@@ -283,10 +287,6 @@ md.render('![Figure](cat.jpg "resize:50%")', { mdPath: mdPat })
 ```
 
 If you render HTML with the Node plugin and then run the DOM script, keep `resizeDataAttr: 'data-img-resize'` (default) so the resize hint survives title removal. If you do not need DOM reprocessing, set `resizeDataAttr: ''` to avoid extra attributes.
-
-### Advanced options
-
-- `imgSrcPrefix`: rewrites only the origin of the resolved base URL (advanced; avoid new usage). Example: base `https://example.com/assets/` + `imgSrcPrefix: https://cdn.example.com/` -> `https://cdn.example.com/assets/`.
 
 ### Set `loading` and `decoding` attributes
 
