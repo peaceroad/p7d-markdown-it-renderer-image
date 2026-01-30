@@ -24,6 +24,7 @@ const defaultDomOptions = Object.freeze({
   awaitSizeProbes: true, // await image load for size calculation
   sizeProbeTimeoutMs: 3000, // timeout for size probe (0 disables)
   onImageProcessed: null, // per-image callback
+  suppressNoopWarning: false, // silence browser default-export warning
   readMeta: false, // read meta[name="markdown-frontmatter"]
 })
 

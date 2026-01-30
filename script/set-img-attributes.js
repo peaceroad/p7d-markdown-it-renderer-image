@@ -120,6 +120,7 @@ export const createContext = async (markdownCont = '', option = {}, root = null)
     setBool('setDomSrc', rendererSettings.setDomSrc)
     setBool('enableSizeProbe', rendererSettings.enableSizeProbe)
     setBool('awaitSizeProbes', rendererSettings.awaitSizeProbes)
+    setBool('suppressNoopWarning', rendererSettings.suppressNoopWarning)
     setString('previewMode', rendererSettings.previewMode)
     setString('urlImageBase', rendererSettings.urlImageBase)
     setString('outputUrlMode', rendererSettings.outputUrlMode)
@@ -733,8 +734,13 @@ export const applyImageTransformsToString = async (htmlString, contextOrOptions 
 }
 
 let warnedDefaultExport = false
+const shouldSuppressNoopWarning = (option) => {
+  if (option && option.suppressNoopWarning) return true
+  if (typeof process !== 'undefined' && process?.env?.NODE_ENV === 'production') return true
+  return false
+}
 const mditRendererImageBrowser = (_md, _option) => {
-  if (warnedDefaultExport) return
+  if (warnedDefaultExport || shouldSuppressNoopWarning(_option)) return
   if (typeof console !== 'undefined' && console && typeof console.warn === 'function') {
     console.warn('[renderer-image(dom)] Default export is a no-op in the browser. Use createContext/applyImageTransforms/startObserver instead.')
   }

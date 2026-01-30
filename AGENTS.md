@@ -16,6 +16,7 @@
 ## script/set-img-attributes.js (browser)
 1. Exports `createContext`, `applyImageTransforms`, `applyImageTransformsToString`, and `startObserver`.
    - Also exports `defaultSharedOptions`, `defaultDomOptions`, `defaultNodeOptions` for shared defaults.
+   - Default export is a no-op shim; `suppressNoopWarning` silences the browser warning.
 2. `createContext(markdownCont, options, root)` parses options and YAML frontmatter (`url`/`urlimage`/`urlimagebase`/`lid`/`lmd`/`imagescale`, lowercase only) and optionally reads `meta[name="markdown-frontmatter"]` when `readMeta: true` (merging `_extensionSettings.rendererImage` unless disabled).
 3. `applyImageTransforms(root, contextOrOptions)`:
    - Applies path rewriting when `resolveSrc: true`, using image base (`urlimage` absolute > `urlimagebase` + url path > `url`, with `urlImageBase` option as fallback). Relative `urlimage` is treated as an image directory (basename only).

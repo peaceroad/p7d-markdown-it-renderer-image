@@ -56,10 +56,12 @@ const transformed = await applyImageTransformsToString(htmlSource, context)
 
 Notes:
 - The DOM helper provides named functions; the default export is a no-op compatibility shim.
+- The no-op warning is shown once in non-production. Set `suppressNoopWarning: true` to silence it.
 - In browser builds, importing the package root resolves to the DOM helper (named exports + no-op default). Use the script path if you want to be explicit.
 - Default option objects are exported (`defaultSharedOptions`, `defaultDomOptions`, `defaultNodeOptions`) to keep CLI and DOM configs in sync.
 - `createContext` reads YAML frontmatter from the first argument (markdown text). Pass `null`/`''` to skip YAML parsing and rely on `readMeta` (JSON in `meta[name="markdown-frontmatter"]`).
 - The DOM script imports `./img-util.js` as a module; bundle it or ensure the base URL resolves correctly.
+- For source views or HTML previews, prefer `applyImageTransformsToString()` before mounting into the live DOM.
 
 Example (bundler or app code that rerenders HTML):
 
@@ -129,8 +131,12 @@ Scale/resize/title-handling and lazy/decoding options behave the same as the Nod
 - `awaitSizeProbes` (true): wait for image load before resolving `applyImageTransforms`.
 - `sizeProbeTimeoutMs` (3000): timeout for size probes (0 disables).
 - `onImageProcessed` (null): per-image callback `(imgEl, info) => {}`.
+- `suppressNoopWarning` (false): silence the browser default-export warning.
 
 `readMeta` is opt-in to avoid extra DOM work in normal pages; enable it for live preview scenarios (e.g., VS Code). When running a page from `file://`, the DOM script defaults `suppressErrors` to `local` and disables `enableSizeProbe` unless you explicitly override them, to reduce noisy console errors from local image probes.
+`suppressErrors` only silences renderer-image logs; browser network errors (CORS/404) can still appear in the console.
+
+Editing/draft mode tip: to avoid noisy requests while users type, set `setDomSrc: false`, `enableSizeProbe: false`, and `previewMode: 'markdown'`, then re-run transforms when the input stabilizes.
 
 ## Options (details)
 
