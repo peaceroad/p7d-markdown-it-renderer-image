@@ -21,6 +21,7 @@
    - `lmd` handling: keep existing URL schemes; if `lmd` is an absolute local path, convert to `file:///` with URL-encoded segments and a trailing slash; relative `lmd` stays relative.
    - `previewMode`: `output` | `markdown` | `local`. When not `output`, store final URL in `previewOutputSrcAttr` and cache original `src` in `data-img-src-raw`.
    - `setDomSrc: false` keeps `img.src` untouched while still running size probes.
+   - `enableSizeProbe: false` skips size probing entirely (no network or image load).
    - `loadSrcResolver` / `loadSrcMap` can override the measurement source (`loadSrc`) for size calculation.
    - Returns a summary object `{ total, processed, pending, sized, failed, timeout, skipped }` and optionally calls `onImageProcessed(img, info)` per image.
    - Uses `awaitSizeProbes` and `sizeProbeTimeoutMs` to control async sizing.
@@ -39,7 +40,7 @@
 
 ## Concerns / notes
 - VS Code Webview blocks `file://`; pass `lmd` as a Webview URI from the extension (e.g., `asWebviewUri`) instead of a raw path.
-- Dynamic import of `./img-util.js` can fail in Webview unless the script is loaded with a compatible base URL or bundled.
+- The DOM module imports `./img-util.js`; ensure the base URL is compatible or bundle it for Webview use.
 - Remote sizing in `index.js` uses synchronous fetch; if enabled in an extension host, it can block UI. Prefer `disableRemoteSize: true` in VS Code.
 - `remoteMaxBytes` only applies when content-length is present; large remote downloads can still occur without it.
 - Relative `urlimage` enforces basename-only for relative `src` when a base URL is used.

@@ -265,3 +265,11 @@ const mditRendererImage = (md, option) => {
 }
 
 export default mditRendererImage
+
+const browserOnlyApi = (name) => {
+  throw new Error(`[renderer-image] ${name} is a browser-only API. Import it from ./script/set-img-attributes.js and call it in the browser.`)
+}
+
+export const createContext = async () => browserOnlyApi('createContext')
+export const applyImageTransforms = async () => browserOnlyApi('applyImageTransforms')
+export const startObserver = async () => browserOnlyApi('startObserver')

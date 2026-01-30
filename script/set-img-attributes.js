@@ -1,39 +1,26 @@
-let utilsPromise = null
+import {
+  setImgSize,
+  parseFrontmatter,
+  getFrontmatter,
+  normalizeRelativePath,
+  resolveImageBase,
+  normalizeResizeValue,
+  resizeValueReg,
+  normalizeExtensions,
+  isHttpUrl,
+  isProtocolRelativeUrl,
+  isFileUrl,
+  hasUrlScheme,
+  hasSpecialScheme,
+  isAbsolutePath,
+  toFileUrl,
+  escapeForRegExp,
+  stripQueryHash,
+  getBasename,
+  getImageName,
+  applyOutputUrlMode,
+} from './img-util.js'
 
-const loadUtils = async () => {
-  if (!utilsPromise) {
-    utilsPromise = import('./img-util.js')
-  }
-  return utilsPromise
-}
-
-const escapeForRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-const isAbsolutePath = (value) => {
-  if (!value) return false
-  if (value.startsWith('//')) return true
-  if (value.startsWith('/')) return true
-  return /^[A-Za-z]:\//.test(value)
-}
-const toFileUrl = (value) => {
-  if (!value) return ''
-  const normalized = String(value).replace(/\\/g, '/')
-  if (!normalized) return ''
-  if (normalized.startsWith('//')) {
-    const without = normalized.replace(/^\/+/, '')
-    if (!without) return 'file:///'
-    const segments = without.split('/')
-    const host = segments.shift() || ''
-    const encodedPath = segments.map((segment) => encodeURIComponent(segment)).join('/')
-    return host ? `file://${host}/${encodedPath}` : 'file:///'
-  }
-  const without = normalized.replace(/^\/+/, '')
-  const segments = without.split('/')
-  const encoded = segments.map((segment, index) => {
-    if (index === 0 && /^[A-Za-z]:$/.test(segment)) return segment
-    return encodeURIComponent(segment)
-  })
-  return `file:///${encoded.join('/')}`
-}
 const getAttr = (element, name) => {
   if (!element) return ''
   const value = element.getAttribute ? element.getAttribute(name) : null
@@ -67,26 +54,6 @@ const collectImages = (root) => {
 }
 
 export const createContext = async (markdownCont = '', option = {}, root = null) => {
-  const {
-    setImgSize,
-    parseFrontmatter,
-    getFrontmatter,
-    normalizeRelativePath,
-    resolveImageBase,
-    normalizeResizeValue,
-    resizeValueReg,
-    normalizeExtensions,
-    isHttpUrl,
-    isProtocolRelativeUrl,
-    isFileUrl,
-    hasUrlScheme,
-    hasSpecialScheme,
-    stripQueryHash,
-    getBasename,
-    getImageName,
-    applyOutputUrlMode,
-  } = await loadUtils()
-
   const opt = {
     scaleSuffix: false, // scale by @2x or dpi/ppi suffix
     resize: false, // resize by title hint
@@ -103,6 +70,7 @@ export const createContext = async (markdownCont = '', option = {}, root = null)
     resizeDataAttr: 'data-img-resize', // store resize hint when title removed
     loadSrcResolver: null, // override loadSrc for size measurement
     loadSrcMap: null, // map markdown src to loadSrc for size measurement
+    enableSizeProbe: true, // run image size probing
     awaitSizeProbes: true, // await image load for size calculation
     sizeProbeTimeoutMs: 3000, // timeout for size probe (0 disables)
     onImageProcessed: null, // per-image callback
@@ -170,6 +138,7 @@ export const createContext = async (markdownCont = '', option = {}, root = null)
     setBool('asyncDecode', rendererSettings.asyncDecode)
     setBool('resolveSrc', rendererSettings.resolveSrc)
     setBool('setDomSrc', rendererSettings.setDomSrc)
+    setBool('enableSizeProbe', rendererSettings.enableSizeProbe)
     setBool('awaitSizeProbes', rendererSettings.awaitSizeProbes)
     setString('previewMode', rendererSettings.previewMode)
     setString('urlImageBase', rendererSettings.urlImageBase)
@@ -230,6 +199,9 @@ export const createContext = async (markdownCont = '', option = {}, root = null)
   }
   if (!Number.isFinite(currentOpt.sizeProbeTimeoutMs) || currentOpt.sizeProbeTimeoutMs < 0) {
     currentOpt.sizeProbeTimeoutMs = 0
+  }
+  if (typeof currentOpt.enableSizeProbe !== 'boolean') {
+    currentOpt.enableSizeProbe = true
   }
 
   const resolvedFrontmatter = getFrontmatter(frontmatter, currentOpt) || {}
@@ -578,6 +550,18 @@ export const applyImageTransforms = async (root, contextOrOptions = {}, markdown
       }
       continue
     }
+    if (!currentOpt.enableSizeProbe) {
+      summary.skipped += 1
+      if (onImageProcessed) {
+        onImageProcessed(img, {
+          status: 'skipped',
+          loadSrc,
+          finalSrc,
+          displaySrc,
+        })
+      }
+      continue
+    }
 
     const payload = {
       loadSrc,
@@ -747,3 +731,14 @@ export const startObserver = async (root, contextOrOptions = {}, markdownCont = 
     disconnect: () => observer.disconnect(),
   }
 }
+
+let warnedDefaultExport = false
+const mditRendererImageBrowser = (_md, _option) => {
+  if (warnedDefaultExport) return
+  if (typeof console !== 'undefined' && console && typeof console.warn === 'function') {
+    console.warn('[renderer-image(dom)] Default export is a no-op in the browser. Use createContext/applyImageTransforms/startObserver instead.')
+  }
+  warnedDefaultExport = true
+}
+
+export default mditRendererImageBrowser

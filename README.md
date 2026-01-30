@@ -52,9 +52,10 @@ startObserver(document, context)
 ```
 
 Notes:
-- The DOM helper exports **named functions only** (no default export).
+- The DOM helper provides named functions; the default export is a no-op compatibility shim.
+- In browser builds, importing the package root resolves to the DOM helper (named exports + no-op default). Use the script path if you want to be explicit.
 - `createContext` reads YAML frontmatter from the first argument (markdown text). Pass `null`/`''` to skip YAML parsing and rely on `readMeta` (JSON in `meta[name="markdown-frontmatter"]`).
-- The DOM script dynamically imports `./img-util.js`; bundle it or ensure the base URL resolves correctly.
+- The DOM script imports `./img-util.js` as a module; bundle it or ensure the base URL resolves correctly.
 
 Example (bundler or app code that rerenders HTML):
 
@@ -117,6 +118,7 @@ Same as Node options except remote sizing options, plus:
 - `loadSrcResolver` (null): function to override the measurement source (`loadSrc`) for size calculation (DOM only).
 - `loadSrcMap` (null): map of `src` -> `loadSrc` overrides for size calculation (DOM only).
 - `setDomSrc` (true): when false, leaves `img.src` untouched (size probing still runs).
+- `enableSizeProbe` (true): when false, skips size probing entirely (no network or image load).
 - `awaitSizeProbes` (true): wait for image load before resolving `applyImageTransforms`.
 - `sizeProbeTimeoutMs` (3000): timeout for size probes (0 disables).
 - `onImageProcessed` (null): per-image callback `(imgEl, info) => {}`.
@@ -309,4 +311,4 @@ Remote sizing is synchronous. For extension hosts (e.g., VS Code), set `disableR
 ## VS Code / Webview notes
 
 - Webview blocks `file://`. Pass `lmd` as a Webview URI (`asWebviewUri`) if you need local sizing in the DOM.
-- The DOM script uses a dynamic import for `./img-util.js`; bundle it or ensure the base URL resolves correctly.
+- The DOM script imports `./img-util.js` as a module; bundle it or ensure the base URL resolves correctly.

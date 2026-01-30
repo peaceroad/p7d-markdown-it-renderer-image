@@ -25,8 +25,8 @@ const stripQueryHash = (value) => {
   if (!text) return ''
   return text.split(/[?#]/)[0]
 }
-const escapeForRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-const normalizeExtensions = (value) => (value || '')
+const escapeForRegExp = (value) => toText(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+const normalizeExtensions = (value) => toText(value)
   .split(',')
   .map((ext) => ext.trim().replace(/^\.+/, ''))
   .filter(Boolean)
@@ -36,6 +36,34 @@ const isProtocolRelativeUrl = (value) => /^\/\//.test(toText(value))
 const isFileUrl = (value) => /^file:\/\//i.test(toText(value))
 const hasUrlScheme = (value) => /^[a-z][a-z0-9+.-]*:\/\//i.test(toText(value))
 const hasSpecialScheme = (value) => /^(data|blob|vscode-resource|vscode-webview-resource|vscode-file):/i.test(toText(value))
+const isAbsolutePath = (value) => {
+  const text = toText(value)
+  if (!text) return false
+  if (text.startsWith('//')) return true
+  if (text.startsWith('/')) return true
+  return /^[A-Za-z]:\//.test(text)
+}
+const toFileUrl = (value) => {
+  const text = toText(value)
+  if (!text) return ''
+  const normalized = text.replace(/\\/g, '/')
+  if (!normalized) return ''
+  if (normalized.startsWith('//')) {
+    const without = normalized.replace(/^\/+/, '')
+    if (!without) return 'file:///'
+    const segments = without.split('/')
+    const host = segments.shift() || ''
+    const encodedPath = segments.map((segment) => encodeURIComponent(segment)).join('/')
+    return host ? `file://${host}/${encodedPath}` : 'file:///'
+  }
+  const without = normalized.replace(/^\/+/, '')
+  const segments = without.split('/')
+  const encoded = segments.map((segment, index) => {
+    if (index === 0 && /^[A-Za-z]:$/.test(segment)) return segment
+    return encodeURIComponent(segment)
+  })
+  return `file:///${encoded.join('/')}`
+}
 const isAbsoluteUrl = (value) => {
   const text = toText(value)
   if (!text) return false
@@ -341,6 +369,9 @@ export {
   isFileUrl,
   hasUrlScheme,
   hasSpecialScheme,
+  isAbsolutePath,
+  toFileUrl,
+  escapeForRegExp,
   getBasename,
   getImageName,
   applyOutputUrlMode,

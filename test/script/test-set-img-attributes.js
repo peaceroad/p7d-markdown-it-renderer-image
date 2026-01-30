@@ -866,4 +866,25 @@ await runTest(37, 'awaitSizeProbes false leaves pending', async () => {
   assert.ok(result.summary.pending >= 1)
 })
 
+// Test 38: enableSizeProbe false skips probing
+await runTest(38, 'enableSizeProbe false skips size probing', async () => {
+  const images = [
+    new MockElement('img', { src: 'cat.jpg', alt: 'cat' })
+  ]
+
+  const result = await testSetImageAttributes(
+    images,
+    { enableSizeProbe: false, resize: true },
+    null,
+    null,
+    null,
+    true
+  )
+
+  const img = result.images[0]
+  assert.strictEqual(img.getAttribute('width'), '')
+  assert.strictEqual(img.getAttribute('height'), '')
+  assert.strictEqual(result.summary.sized, 0)
+})
+
 console.log('All tests passed')

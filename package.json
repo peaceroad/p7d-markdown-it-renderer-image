@@ -4,6 +4,17 @@
   "description": "A markdown-it plugin. This add width and height attributes to img elements.",
   "main": "index.js",
   "type": "module",
+  "exports": {
+    ".": {
+      "browser": "./script/set-img-attributes.js",
+      "import": "./index.js",
+      "default": "./index.js"
+    },
+    "./index.js": "./index.js",
+    "./script/set-img-attributes.js": "./script/set-img-attributes.js",
+    "./script/img-util.js": "./script/img-util.js"
+  },
+  "browser": "./script/set-img-attributes.js",
   "files": [
     "index.js",
     "script/",
