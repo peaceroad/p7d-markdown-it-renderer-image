@@ -11,6 +11,7 @@
       "default": "./index.js"
     },
     "./index.js": "./index.js",
+    "./script/default-options.js": "./script/default-options.js",
     "./script/set-img-attributes.js": "./script/set-img-attributes.js",
     "./script/img-util.js": "./script/img-util.js"
   },

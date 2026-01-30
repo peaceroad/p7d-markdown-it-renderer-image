@@ -2,6 +2,7 @@ import path from 'path'
 import { fileURLToPath } from 'url'
 import fetch from 'sync-fetch'
 import imageSize from 'image-size'
+import { defaultSharedOptions, defaultDomOptions, defaultNodeOptions } from './script/default-options.js'
 import {
   setImgSize,
   getFrontmatter,
@@ -18,6 +19,8 @@ import {
   applyOutputUrlMode,
   safeDecodeUri,
 } from './script/img-util.js'
+
+export { defaultSharedOptions, defaultDomOptions, defaultNodeOptions }
 
 const tokensState = new WeakMap()
 const globalFailedImgLoads = new Set()
@@ -94,25 +97,7 @@ const getImgData = (src, isRemote, timeout, cache, cacheMax, failedSet, suppress
 
 
 const mditRendererImage = (md, option) => {
-  const opt = {
-    scaleSuffix: false, // scale by @2x or dpi/ppi suffix
-    mdPath: '', // markdown file path for local sizing
-    lazyLoad: false, // add loading="lazy"
-    resize: false, // resize by title hint
-    asyncDecode: false, // add decoding="async"
-    checkImgExtensions: 'png,jpg,jpeg,gif,webp', // size only these extensions
-    resolveSrc: true, // resolve final src using frontmatter when available
-    urlImageBase: '', // fallback base when frontmatter lacks urlimagebase
-    outputUrlMode: 'absolute', // absolute | protocol-relative | path-only
-    autoHideResizeTitle: true, // remove title when resize hint used
-    resizeDataAttr: 'data-img-resize', // store resize hint when title removed
-    noUpscale: true, // internal: prevent final size from exceeding original pixels
-    remoteTimeout: 5000, // sync fetch timeout (ms)
-    disableRemoteSize: false, // skip remote sizing
-    cacheMax: 64, // per-render image data cache size
-    suppressErrors: 'none', // 'none' | 'all' | 'local' | 'remote'
-    remoteMaxBytes: 16 * 1024 * 1024, // skip large remote images (if content-length)
-  }
+  const opt = { ...defaultNodeOptions }
   const safeOption = option && typeof option === 'object' ? { ...option } : null
   if (safeOption && Object.prototype.hasOwnProperty.call(safeOption, 'noUpscale')) {
     delete safeOption.noUpscale

@@ -57,6 +57,7 @@ const transformed = await applyImageTransformsToString(htmlSource, context)
 Notes:
 - The DOM helper provides named functions; the default export is a no-op compatibility shim.
 - In browser builds, importing the package root resolves to the DOM helper (named exports + no-op default). Use the script path if you want to be explicit.
+- Default option objects are exported (`defaultSharedOptions`, `defaultDomOptions`, `defaultNodeOptions`) to keep CLI and DOM configs in sync.
 - `createContext` reads YAML frontmatter from the first argument (markdown text). Pass `null`/`''` to skip YAML parsing and rely on `readMeta` (JSON in `meta[name="markdown-frontmatter"]`).
 - The DOM script imports `./img-util.js` as a module; bundle it or ensure the base URL resolves correctly.
 
@@ -64,12 +65,13 @@ Example (bundler or app code that rerenders HTML):
 
 ```js
 import { createContext, applyImageTransforms } from '@peaceroad/markdown-it-renderer-image/script/set-img-attributes.js'
+import { defaultDomOptions } from '@peaceroad/markdown-it-renderer-image'
 
 txt.addEventListener('input', async () => {
   const markdownCont = txt.value
   html.innerHTML = renderedHtml
 
-  const context = await createContext(markdownCont, { readMeta: true }, html)
+  const context = await createContext(markdownCont, { ...defaultDomOptions, readMeta: true }, html)
   await applyImageTransforms(html, context, markdownCont)
 })
 ```
@@ -111,6 +113,8 @@ Intentional differences:
 ### DOM script options (defaults)
 
 Same as Node options except remote sizing options, plus:
+
+Scale/resize/title-handling and lazy/decoding options behave the same as the Node plugin: they affect width/height calculation and set `loading`/`decoding` attributes on the DOM.
 
 - `readMeta` (false): read `meta[name="markdown-frontmatter"]` (JSON).
 - `previewMode` (`output`): `output` | `markdown` | `local`.

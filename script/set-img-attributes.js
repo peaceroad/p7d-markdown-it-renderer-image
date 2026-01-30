@@ -20,6 +20,9 @@ import {
   getImageName,
   applyOutputUrlMode,
 } from './img-util.js'
+import { defaultSharedOptions, defaultDomOptions, defaultNodeOptions } from './default-options.js'
+
+export { defaultSharedOptions, defaultDomOptions, defaultNodeOptions }
 
 const getAttr = (element, name) => {
   if (!element) return ''
@@ -54,30 +57,7 @@ const collectImages = (root) => {
 }
 
 export const createContext = async (markdownCont = '', option = {}, root = null) => {
-  const opt = {
-    scaleSuffix: false, // scale by @2x or dpi/ppi suffix
-    resize: false, // resize by title hint
-    lazyLoad: false, // add loading="lazy"
-    asyncDecode: false, // add decoding="async"
-    checkImgExtensions: 'png,jpg,jpeg,gif,webp', // size only these extensions
-    resolveSrc: true, // resolve final src using frontmatter
-    urlImageBase: '', // fallback base when frontmatter lacks urlimagebase
-    outputUrlMode: 'absolute', // absolute | protocol-relative | path-only
-    previewMode: 'output', // output | markdown | local
-    previewOutputSrcAttr: 'data-img-output-src', // store final src when previewMode !== output
-    setDomSrc: true, // write img.src in DOM
-    autoHideResizeTitle: true, // remove title when resize hint used
-    resizeDataAttr: 'data-img-resize', // store resize hint when title removed
-    loadSrcResolver: null, // override loadSrc for size measurement
-    loadSrcMap: null, // map markdown src to loadSrc for size measurement
-    enableSizeProbe: true, // run image size probing
-    awaitSizeProbes: true, // await image load for size calculation
-    sizeProbeTimeoutMs: 3000, // timeout for size probe (0 disables)
-    onImageProcessed: null, // per-image callback
-    noUpscale: true, // internal: prevent final size from exceeding original pixels
-    suppressErrors: 'none', // 'none' | 'all' | 'local' | 'remote'
-    readMeta: false, // read meta[name="markdown-frontmatter"]
-  }
+  const opt = { ...defaultDomOptions }
   const safeOption = option && typeof option === 'object' ? { ...option } : null
   if (safeOption && Object.prototype.hasOwnProperty.call(safeOption, 'noUpscale')) {
     delete safeOption.noUpscale
