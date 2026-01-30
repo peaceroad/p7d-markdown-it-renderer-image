@@ -176,6 +176,9 @@ export const createContext = async (markdownCont = '', option = {}, root = null)
   const suppressErrorsOverridden = optionOverrides.has('suppressErrors')
     || (extensionSettings?.rendererImage
       && Object.prototype.hasOwnProperty.call(extensionSettings.rendererImage, 'suppressErrors'))
+  const enableSizeProbeOverridden = optionOverrides.has('enableSizeProbe')
+    || (extensionSettings?.rendererImage
+      && Object.prototype.hasOwnProperty.call(extensionSettings.rendererImage, 'enableSizeProbe'))
   if (extensionSettings) {
     if (extensionSettings.notSetImageElementAttributes || extensionSettings.disableRendererImage) {
       return { skip: true, opt: currentOpt }
@@ -191,6 +194,9 @@ export const createContext = async (markdownCont = '', option = {}, root = null)
   const isFileProtocol = typeof location !== 'undefined' && location && location.protocol === 'file:'
   if (!suppressErrorsOverridden && isFileProtocol && currentOpt.suppressErrors === 'none') {
     currentOpt.suppressErrors = 'local'
+  }
+  if (isFileProtocol && !enableSizeProbeOverridden) {
+    currentOpt.enableSizeProbe = false
   }
   const allowedPreviewModes = new Set(['output', 'markdown', 'local'])
   if (!allowedPreviewModes.has(currentOpt.previewMode)) {
@@ -730,6 +736,20 @@ export const startObserver = async (root, contextOrOptions = {}, markdownCont = 
   return {
     disconnect: () => observer.disconnect(),
   }
+}
+
+/**
+ * Applies image transforms to an HTML string using DOMParser.
+ * Useful for source views or processing HTML without mounting it to the main DOM.
+ */
+export const applyImageTransformsToString = async (htmlString, contextOrOptions = {}, markdownCont = '') => {
+  if (typeof DOMParser === 'undefined') {
+    throw new Error('[renderer-image(dom)] DOMParser is not available.')
+  }
+  const parser = new DOMParser()
+  const doc = parser.parseFromString(String(htmlString || ''), 'text/html')
+  await applyImageTransforms(doc.body, contextOrOptions, markdownCont)
+  return doc.body.innerHTML
 }
 
 let warnedDefaultExport = false

@@ -283,6 +283,7 @@ const getFrontmatter = (frontmatter, opt) => {
   if (!frontmatter || typeof frontmatter !== 'object' || Array.isArray(frontmatter)) return null
 
   let lid = toText(frontmatter.lid)
+  if (lid) lid = lid.replace(/\\/g, '/')
   if (lid) {
     if (!/\/$/.test(lid)) lid += '/'
     if (/^.\//.test(lid)) lid = lid.replace(/^.\//, '')
@@ -314,6 +315,7 @@ const getFrontmatter = (frontmatter, opt) => {
     imageDir = imageDir.replace(/^\/+/, '')
   }
   let lmd = toText(frontmatter.lmd)
+  if (lmd) lmd = lmd.replace(/\\/g, '/')
   if (lmd) {
     if (!/\/$/.test(lmd)) lmd += '/'
   }

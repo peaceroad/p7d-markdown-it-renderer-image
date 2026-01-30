@@ -14,7 +14,7 @@
 4. Frontmatter resolution and base URL are cached per render to avoid recompute.
 
 ## script/set-img-attributes.js (browser)
-1. Exports `createContext`, `applyImageTransforms`, and `startObserver`.
+1. Exports `createContext`, `applyImageTransforms`, `applyImageTransformsToString`, and `startObserver`.
 2. `createContext(markdownCont, options, root)` parses options and YAML frontmatter (`url`/`urlimage`/`urlimagebase`/`lid`/`lmd`/`imagescale`, lowercase only) and optionally reads `meta[name="markdown-frontmatter"]` when `readMeta: true` (merging `_extensionSettings.rendererImage` unless disabled).
 3. `applyImageTransforms(root, contextOrOptions)`:
    - Applies path rewriting when `resolveSrc: true`, using image base (`urlimage` absolute > `urlimagebase` + url path > `url`, with `urlImageBase` option as fallback). Relative `urlimage` is treated as an image directory (basename only).
@@ -25,7 +25,8 @@
    - `loadSrcResolver` / `loadSrcMap` can override the measurement source (`loadSrc`) for size calculation.
    - Returns a summary object `{ total, processed, pending, sized, failed, timeout, skipped }` and optionally calls `onImageProcessed(img, info)` per image.
    - Uses `awaitSizeProbes` and `sizeProbeTimeoutMs` to control async sizing.
-4. `startObserver(root, contextOrOptions)` runs a MutationObserver and re-applies transforms; returns `{ disconnect }`.
+4. `applyImageTransformsToString(html, contextOrOptions)` uses `DOMParser` to transform an HTML string and returns the updated HTML.
+5. `startObserver(root, contextOrOptions)` runs a MutationObserver and re-applies transforms; returns `{ disconnect }`.
 
 ## Utilities (script/img-util.js)
 - Frontmatter parsing, path normalization, resize/scaleSuffix regexes, image base resolution, and size adjustment (`setImgSize`).
@@ -46,7 +47,7 @@
 - Relative `urlimage` enforces basename-only for relative `src` when a base URL is used.
 - `outputUrlMode: path-only` assumes same-origin and will drop the domain.
 - `previewMode: 'markdown'` keeps the markdown `src` for display; in VS Code Webview, relative paths may not resolve, so use `previewMode: 'output'` there.
-- On `file://` pages, the DOM script auto-sets `suppressErrors: 'local'` unless explicitly overridden to reduce noisy local load errors.
+- On `file://` pages, the DOM script auto-sets `suppressErrors: 'local'` and disables `enableSizeProbe` unless explicitly overridden to reduce noisy local load errors.
 
 ## Browser Notes
 - Safari Technology Preview 222: `<figcaption>` inside `<figure>` contributes to `<img>` accessible name only when no `alt`, ARIA, or `title` is present (295746@main / 150597445).

@@ -37,7 +37,7 @@ console.log(html)
 
 ```html
 <script type="module">
-import { createContext, applyImageTransforms, startObserver } from '<package>/script/set-img-attributes.js'
+import { createContext, applyImageTransforms, applyImageTransformsToString, startObserver } from '<package>/script/set-img-attributes.js'
 
 const context = await createContext(markdownCont, {
   readMeta: true, // read frontmatter from <meta>
@@ -48,6 +48,9 @@ await applyImageTransforms(document, context)
 
 // Or observe mutations
 startObserver(document, context)
+
+// Process an HTML string (e.g. source view)
+const transformed = await applyImageTransformsToString(htmlSource, context)
 </script>
 ```
 
@@ -123,7 +126,7 @@ Same as Node options except remote sizing options, plus:
 - `sizeProbeTimeoutMs` (3000): timeout for size probes (0 disables).
 - `onImageProcessed` (null): per-image callback `(imgEl, info) => {}`.
 
-`readMeta` is opt-in to avoid extra DOM work in normal pages; enable it for live preview scenarios (e.g., VS Code). When running a page from `file://`, the DOM script defaults `suppressErrors` to `local` unless you explicitly set `suppressErrors`, to reduce noisy console errors from local image probes.
+`readMeta` is opt-in to avoid extra DOM work in normal pages; enable it for live preview scenarios (e.g., VS Code). When running a page from `file://`, the DOM script defaults `suppressErrors` to `local` and disables `enableSizeProbe` unless you explicitly override them, to reduce noisy console errors from local image probes.
 
 ## Options (details)
 

@@ -273,3 +273,4 @@ const browserOnlyApi = (name) => {
 export const createContext = async () => browserOnlyApi('createContext')
 export const applyImageTransforms = async () => browserOnlyApi('applyImageTransforms')
 export const startObserver = async () => browserOnlyApi('startObserver')
+export const applyImageTransformsToString = async () => browserOnlyApi('applyImageTransformsToString')
