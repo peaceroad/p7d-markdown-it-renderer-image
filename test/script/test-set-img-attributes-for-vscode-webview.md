@@ -41,7 +41,7 @@ This test validates that the `set-img-attributes.js` script works correctly in a
 The following script tests the DOM manipulation:
 
 <script type="module">
-import setImageAttributes from '../../script/set-img-attributes.js'
+import { createContext, applyImageTransforms } from '../../script/set-img-attributes.js'
 
 // VSCode WebView operation test
 document.addEventListener('DOMContentLoaded', async () => {
@@ -65,10 +65,11 @@ url: https://example.com/article/
 ![Another Cat](../cat.jpg)`
 
   try {
-    await setImageAttributes(markdownContent, {
+    const context = await createContext(markdownContent, {
       resolveSrc: true,
       scaleSuffix: true
-    })
+    }, document)
+    await applyImageTransforms(document, context)
     
     console.log('=== After DOM manipulation ===')
     images.forEach((img, i) => {

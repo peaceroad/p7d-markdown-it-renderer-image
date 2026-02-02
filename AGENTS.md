@@ -3,7 +3,7 @@
 ## index.js (markdown-it plugin, Node)
 1. Initialize options (resolveSrc on by default, remote sizing on by default, cache, suppressErrors, outputUrlMode, urlImageBase).
 2. Prepare extension regex (query/hash ignored).
-3. For each `image` token:
+3. Use `md.core.ruler.after('replacements')` to walk inline tokens and process each `image` token (no renderer override).
    - Read `srcRaw`/`title`; split base + query/hash.
    - If `resolveSrc` and frontmatter (or `urlImageBase` option) exist: parse frontmatter, strip `lid`, build image base (`urlimage` absolute > `urlimagebase` + url path > `url`), treat relative `urlimage` as an image directory (basename only), normalize; keep query/hash.
    - Apply `outputUrlMode` to final URL.

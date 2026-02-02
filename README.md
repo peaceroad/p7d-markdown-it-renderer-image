@@ -325,3 +325,19 @@ Remote sizing is synchronous. For extension hosts (e.g., VS Code), set `disableR
 
 - Webview blocks `file://`. Pass `lmd` as a Webview URI (`asWebviewUri`) if you need local sizing in the DOM.
 - The DOM script imports `./img-util.js` as a module; bundle it or ensure the base URL resolves correctly.
+
+## Note: Using with @peaceroad/markdown-it-figure-with-p-caption
+
+`markdown-it-figure-with-p-caption` can auto-generate captions from title text when its detection rules match. To avoid conflicts, use **title for one purpose only**:
+
+- **Title as resize hint** (recommended): keep captions in a paragraph or alt text, and avoid caption-like strings in title. This lets `autoHideResizeTitle` work as intended.
+- **Title as caption**: do not put resize hints in title, or set `autoHideResizeTitle: false` so the title remains for caption detection.
+
+In short: don’t mix resize hints and caption text in the same title.
+
+## Performance tips
+
+- Node: remote sizing is synchronous; set `disableRemoteSize: true` for extension hosts and rely on DOM sizing.
+- Node: keep `cacheMax` > 0 to avoid repeated I/O on the same image set.
+- DOM: for fast previews, set `enableSizeProbe: false` or `awaitSizeProbes: false`.
+- DOM: if you only need metadata, set `setDomSrc: false` to avoid triggering image loads.

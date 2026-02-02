@@ -22,7 +22,6 @@ import {
 
 export { defaultSharedOptions, defaultDomOptions, defaultNodeOptions }
 
-const tokensState = new WeakMap()
 const globalFailedImgLoads = new Set()
 const globalMissingMdPathWarnings = new Set()
 
@@ -55,9 +54,9 @@ const getLocalImgSrc = (imgSrc, opt, env) => {
   }
   if (dirPath === '') return ''
   const cleanSrc = stripQueryHash(imgSrc)
-    const decodedSrc = safeDecodeUri(cleanSrc)
-    const finalSrc = decodedSrc === cleanSrc ? cleanSrc : decodedSrc
-    return path.resolve(dirPath, finalSrc.replace(/[/\\]/g, path.sep))
+  const decodedSrc = safeDecodeUri(cleanSrc)
+  const finalSrc = decodedSrc === cleanSrc ? cleanSrc : decodedSrc
+  return path.resolve(dirPath, finalSrc.replace(/[/\\]/g, path.sep))
 }
 
 const getImgData = (src, isRemote, timeout, cache, cacheMax, failedSet, suppressLoadErrors, suppressLocalErrors, suppressRemoteErrors, remoteMaxBytes) => {
@@ -113,13 +112,18 @@ const mditRendererImage = (md, option) => {
   const imgExtReg = extPattern
     ? new RegExp('\\.(?:' + extPattern + ')(?=$|[?#])', 'i')
     : /a^/
-
   const remoteSizeEnabled = !opt.disableRemoteSize
 
-  md.renderer.rules['image'] = (tokens, idx, options, env, slf) => {
-    let state = tokensState.get(tokens)
-    if (!state) {
-      state = {
+  const stateCache = new WeakMap()
+  const removeTokenAttr = (token, name) => {
+    const index = token.attrIndex(name)
+    if (index >= 0) token.attrs.splice(index, 1)
+  }
+
+  const ensureState = (state) => {
+    let cached = stateCache.get(state)
+    if (!cached) {
+      cached = {
         imgDataCache: new Map(),
         failedImgLoads: new Set(),
         missingMdPathWarnings: new Set(),
@@ -128,54 +132,40 @@ const mditRendererImage = (md, option) => {
         imageBase: '',
         imageScale: null,
       }
-      tokensState.set(tokens, state)
+      stateCache.set(state, cached)
     }
-    const { imgDataCache, failedImgLoads, missingMdPathWarnings } = state
+    return cached
+  }
 
+  const processImageToken = (token, state, env, fmContext) => {
+    const { imgDataCache, failedImgLoads, missingMdPathWarnings } = state
     const suppressLoadErrors = opt.suppressErrors === 'all'
     const suppressLocalErrors = opt.suppressErrors === 'local' || opt.suppressErrors === 'all'
     const suppressRemoteErrors = opt.suppressErrors === 'remote' || opt.suppressErrors === 'all'
-    const token = tokens[idx]
-    const endTag = options.xhtmlOut ? ' />' : '>'
 
     const srcRaw = token.attrGet('src') || ''
     const srcBase = stripQueryHash(srcRaw)
     const srcSuffix = srcRaw.slice(srcBase.length)
     let src = srcBase
-
     const titleRaw = token.attrGet('title')
 
-    const frontmatter = env?.frontmatter || md.env?.frontmatter
-    const hasFrontmatter = !!(frontmatter && typeof frontmatter === 'object' && Object.keys(frontmatter).length > 0)
-    const shouldParseFrontmatter = hasFrontmatter || !!opt.urlImageBase
-    if (shouldParseFrontmatter && state.frontmatterSource !== frontmatter) {
-      const parsedFrontmatter = getFrontmatter(frontmatter || {}, opt) || {}
-      state.frontmatterSource = frontmatter
-      state.resolvedFrontmatter = parsedFrontmatter
-      state.imageBase = resolveImageBase({
-        url: parsedFrontmatter.url,
-        urlimage: parsedFrontmatter.urlimage,
-        urlimagebase: parsedFrontmatter.urlimagebase || opt.urlImageBase,
-      })
-      state.imageScale = parsedFrontmatter.imageScale
-    }
-    const parsedFrontmatter = shouldParseFrontmatter ? (state.resolvedFrontmatter || {}) : {}
-    const imageScale = shouldParseFrontmatter ? state.imageScale : null
+    const parsedFrontmatter = fmContext?.parsedFrontmatter || {}
+    const imageScale = fmContext?.imageScale || null
+    const hasFrontmatter = fmContext?.hasFrontmatter || false
+    const shouldParseFrontmatter = fmContext?.shouldParseFrontmatter || false
+
     if (opt.resolveSrc && src && (hasFrontmatter || opt.urlImageBase)) {
       const { lid, imageDir, hasImageDir } = parsedFrontmatter
-      const imageBase = state.imageBase || ''
+      const imageBase = fmContext?.imageBase || ''
 
-    if (!isHttpUrl(src) && !isProtocolRelativeUrl(src) && !isFileUrl(src) && !hasSpecialScheme(src)) {
+      if (!isHttpUrl(src) && !isProtocolRelativeUrl(src) && !isFileUrl(src) && !hasSpecialScheme(src)) {
         if (lid) {
-          // Remove lid path from src if src starts with lid
           if (src.startsWith(lid)) {
             src = src.substring(lid.length)
           } else if (src.startsWith('./') && ('.' + src).startsWith(lid)) {
-            // Handle ./path case
             src = ('.' + src).substring(lid.length)
           }
         }
-        // Only modify relative paths (not starting with '/'), absolute paths are kept as-is
         if (imageBase && !src.startsWith('/')) {
           let nextSrc = src
           if (hasImageDir) {
@@ -184,12 +174,12 @@ const mditRendererImage = (md, option) => {
           }
           src = `${imageBase}${nextSrc}`
         }
-        src = normalizeRelativePath(src) + srcSuffix
+        src = normalizeRelativePath(src)
       }
-      token.attrSet('src', src)
     }
 
-    let finalSrc = safeDecodeUri(token.attrGet('src') || (src + srcSuffix))
+    const resolvedSrc = src + srcSuffix
+    let finalSrc = safeDecodeUri(resolvedSrc)
     finalSrc = applyOutputUrlMode(finalSrc, opt.outputUrlMode)
 
     const isValidExt = imgExtReg.test(srcRaw)
@@ -207,19 +197,19 @@ const mditRendererImage = (md, option) => {
         globalMissingMdPathWarnings.add(srcRaw)
       }
 
-    const imgData = hasSrcPath
-      ? getImgData(
+      const imgData = hasSrcPath
+        ? getImgData(
           srcPath,
           isRemote,
           opt.remoteTimeout,
-            imgDataCache,
-            opt.cacheMax,
-            failedImgLoads,
-            suppressLoadErrors,
-            suppressLocalErrors,
-            suppressRemoteErrors,
-            opt.remoteMaxBytes
-          )
+          imgDataCache,
+          opt.cacheMax,
+          failedImgLoads,
+          suppressLoadErrors,
+          suppressLocalErrors,
+          suppressRemoteErrors,
+          opt.remoteMaxBytes
+        )
         : {}
 
       if (imgData?.width !== undefined) {
@@ -232,6 +222,7 @@ const mditRendererImage = (md, option) => {
 
     token.attrSet('src', finalSrc)
     token.attrSet('alt', token.content || '')
+
     const resizeValue = opt.resize ? normalizeResizeValue(titleRaw) : ''
     const removeTitle = opt.autoHideResizeTitle && !!resizeValue
     if (titleRaw && !removeTitle) {
@@ -240,13 +231,49 @@ const mditRendererImage = (md, option) => {
       if (typeof opt.resizeDataAttr === 'string' && opt.resizeDataAttr.trim() && resizeValue) {
         token.attrSet(opt.resizeDataAttr, resizeValue)
       }
-      const titleIndex = token.attrIndex('title')
-      if (titleIndex >= 0) token.attrs.splice(titleIndex, 1)
+      removeTokenAttr(token, 'title')
     }
     if (isValidExt && opt.asyncDecode) token.attrSet('decoding', 'async')
     if (isValidExt && opt.lazyLoad) token.attrSet('loading', 'lazy')
-    return `<img${slf.renderAttrs(token)}${endTag}`
   }
+
+  md.core.ruler.after('replacements', 'renderer_image', (state) => {
+    const cached = ensureState(state)
+    const env = state?.env || {}
+    const frontmatter = env?.frontmatter || md.env?.frontmatter
+    const hasFrontmatter = !!(frontmatter && typeof frontmatter === 'object' && Object.keys(frontmatter).length > 0)
+    const shouldParseFrontmatter = hasFrontmatter || !!opt.urlImageBase
+    if (shouldParseFrontmatter && cached.frontmatterSource !== frontmatter) {
+      const parsedFrontmatter = getFrontmatter(frontmatter || {}, opt) || {}
+      cached.frontmatterSource = frontmatter
+      cached.resolvedFrontmatter = parsedFrontmatter
+      cached.imageBase = resolveImageBase({
+        url: parsedFrontmatter.url,
+        urlimage: parsedFrontmatter.urlimage,
+        urlimagebase: parsedFrontmatter.urlimagebase || opt.urlImageBase,
+      })
+      cached.imageScale = parsedFrontmatter.imageScale
+    }
+    const parsedFrontmatter = shouldParseFrontmatter ? (cached.resolvedFrontmatter || {}) : {}
+    const imageScale = shouldParseFrontmatter ? cached.imageScale : null
+    const imageBase = cached.imageBase || ''
+    const fmContext = {
+      hasFrontmatter,
+      shouldParseFrontmatter,
+      parsedFrontmatter,
+      imageScale,
+      imageBase,
+    }
+    const tokens = state.tokens || []
+    for (const token of tokens) {
+      if (token.type !== 'inline' || !token.children) continue
+      for (const child of token.children) {
+        if (child.type === 'image') {
+          processImageToken(child, cached, env, fmContext)
+        }
+      }
+    }
+  })
 }
 
 export default mditRendererImage
