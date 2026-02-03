@@ -105,7 +105,7 @@ Intentional differences:
 - `asyncDecode` (false): add `decoding="async"`.
 - `checkImgExtensions` (`png,jpg,jpeg,gif,webp`): extensions to size.
 - `resolveSrc` (true): resolve final `src` using frontmatter (no-op without frontmatter or `urlImageBase`).
-- `mdPath` (empty): markdown file path **or** markdown directory for local sizing.
+- `mdPath` (empty): markdown file path **or** markdown directory for local sizing. When the path exists, Node uses `fs.statSync` to decide file vs directory. When the path does not exist, the heuristic is: trailing slash -> directory, otherwise treat paths with an extension as files and everything else as a directory. If you pass an extension-less file path that doesn't exist yet, it will be treated as a directory.
 - `disableRemoteSize` (false): skip remote sizing.
 - `remoteTimeout` (5000): sync fetch timeout in ms.
 - `remoteMaxBytes` (16MB): skip large remote images when content-length is present.
@@ -127,6 +127,7 @@ Scale/resize/title-handling and lazy/decoding options behave the same as the Nod
   - `local`: display a local file URL when `lmd` is an absolute path.
 - `previewOutputSrcAttr` (`data-img-output-src`): attribute name to store the final URL when `previewMode !== output` (set `''` to disable).
 - `loadSrcStrategy` (`output`): pick the source for size probing. `output` | `raw` | `display`.
+- `loadSrcStrategy: 'final'` is accepted for backward compatibility and treated as `output`.
 - `loadSrcPrefixMap` (null): object map to rewrite `loadSrc` by prefix before probing (e.g., `{ "/img": "http://localhost:3000/img" }`).
 - `loadSrcResolver` (null): function to override the measurement source (`loadSrc`) for size calculation (DOM only).
 - `loadSrcMap` (null): map of `src` -> `loadSrc` overrides for size calculation (DOM only).
@@ -242,6 +243,25 @@ In VS Code, pass a Webview URI (e.g., `asWebviewUri`) instead of a raw `file://`
 When `previewMode` is `markdown` or `local`, the DOM script stores the final URL in `previewOutputSrcAttr` (default `data-img-output-src`) so you can copy/export HTML with the CDN URL. The original markdown `src` is cached in `data-img-src-raw` to keep reprocessing stable; `lmd` is still used for size measurement when available. In VS Code Webview, relative `src` may not resolve, so use `previewMode: 'output'` there.
 
 If you need to measure sizes from Blob URLs (e.g., drag-and-drop files), pass `loadSrcResolver` or `loadSrcMap` so the DOM script uses those URLs only for measurement without changing the displayed `src`. Functions cannot be provided via `readMeta` JSON, so use direct options for `loadSrcResolver`. For JSON-only settings, use `loadSrcStrategy` (e.g. `raw`) and `loadSrcPrefixMap` to rewrite probing URLs without custom code.
+
+Load source selection order for probing:
+
+1) Base source is picked by `loadSrcStrategy` (`output`, `raw`, or `display`).
+2) `loadSrcPrefixMap` (if set) rewrites the probe URL by prefix.
+3) `loadSrcResolver` (if provided) or `loadSrcMap` overrides everything.
+
+`raw` uses the original markdown `src` and does **not** pass through `lmd` or `urlImageBase`. If `raw` is a relative path, size probes will likely fail unless you also provide `lmd`, `loadSrcPrefixMap`, or a resolver/map to convert it into a loadable URL.
+
+JSON-only example (VS Code settings):
+
+```json
+{
+  "rendererImage.loadSrcStrategy": "raw",
+  "rendererImage.loadSrcPrefixMap": {
+    "/img/": "http://localhost:3000/img/"
+  }
+}
+```
 
 Only `.html`, `.htm`, `.xhtml` are treated as file names when deriving the path from `url` (used by `urlimagebase`).
 
