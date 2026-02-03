@@ -18,6 +18,8 @@ const defaultDomOptions = Object.freeze({
   previewMode: 'output', // output | markdown | local
   previewOutputSrcAttr: 'data-img-output-src', // store final src when previewMode !== output
   setDomSrc: true, // write img.src in DOM
+  loadSrcStrategy: 'output', // output | raw | display
+  loadSrcPrefixMap: null, // prefix map for loadSrc (e.g., { "/img": "http://..." })
   loadSrcResolver: null, // override loadSrc for size measurement
   loadSrcMap: null, // map markdown src to loadSrc for size measurement
   enableSizeProbe: true, // run image size probing

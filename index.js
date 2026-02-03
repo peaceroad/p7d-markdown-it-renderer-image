@@ -1,3 +1,4 @@
+import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import fetch from 'sync-fetch'
@@ -35,6 +36,27 @@ const setCache = (cache, key, value, maxEntries) => {
   }
 }
 
+const resolveMdDir = (value) => {
+  if (!value) return ''
+  let text = String(value)
+  if (isFileUrl(text)) {
+    try {
+      text = fileURLToPath(text)
+    } catch {
+      return ''
+    }
+  }
+  try {
+    const stat = fs.statSync(text)
+    return stat.isDirectory() ? text : path.dirname(text)
+  } catch {
+    // fall back to heuristics when the path does not exist
+  }
+  if (/[\\/]$/.test(text)) return text.replace(/[\\/]+$/, '')
+  if (path.extname(text)) return path.dirname(text)
+  return text
+}
+
 const getLocalImgSrc = (imgSrc, opt, env) => {
   if (!imgSrc) return ''
   if (isProtocolRelativeUrl(imgSrc)) return ''
@@ -48,9 +70,9 @@ const getLocalImgSrc = (imgSrc, opt, env) => {
   }
   let dirPath = ''
   if (opt.mdPath) {
-    dirPath = path.dirname(opt.mdPath)
+    dirPath = resolveMdDir(opt.mdPath)
   } else if (env?.mdPath) {
-    dirPath = path.dirname(env.mdPath)
+    dirPath = resolveMdDir(env.mdPath)
   }
   if (dirPath === '') return ''
   const cleanSrc = stripQueryHash(imgSrc)

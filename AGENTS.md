@@ -8,7 +8,7 @@
    - If `resolveSrc` and frontmatter (or `urlImageBase` option) exist: parse frontmatter, strip `lid`, build image base (`urlimage` absolute > `urlimagebase` + url path > `url`), treat relative `urlimage` as an image directory (basename only), normalize; keep query/hash.
    - Apply `outputUrlMode` to final URL.
    - Set final `src`/`alt`/`title` (title removed only when `autoHideResizeTitle` + `resize` + resize-pattern match). When removed, preserve the resize hint in `resizeDataAttr` (default `data-img-resize`, set `''` to disable). Optional `decoding`/`loading`.
-   - If extension allowed: resolve path (remote vs local via mdPath), warn once when mdPath missing, skip remote if `disableRemoteSize`.
+   - If extension allowed: resolve path (remote vs local via mdPath, which can be a file path or a directory), warn once when mdPath missing, skip remote if `disableRemoteSize`.
    - Load dimensions via `image-size` (local) or `sync-fetch` + `image-size` (remote); respect `remoteMaxBytes` when content-length is present. Per-render cache; global sets de-duplicate errors/warnings. `cacheMax` 0 disables cache.
    - Apply `setImgSize` (scaleSuffix, resize via title, imagescale, noUpscale always on) and set width/height.
 4. Frontmatter resolution and base URL are cached per render to avoid recompute.
@@ -24,6 +24,8 @@
    - `previewMode`: `output` | `markdown` | `local`. When not `output`, store final URL in `previewOutputSrcAttr` and cache original `src` in `data-img-src-raw`.
    - `setDomSrc: false` keeps `img.src` untouched while still running size probes.
    - `enableSizeProbe: false` skips size probing entirely (no network or image load).
+   - `loadSrcStrategy` chooses the probe source (`output` | `raw` | `display`).
+   - `loadSrcPrefixMap` rewrites probe URLs by prefix (JSON-friendly).
    - `loadSrcResolver` / `loadSrcMap` can override the measurement source (`loadSrc`) for size calculation.
    - Returns a summary object `{ total, processed, pending, sized, failed, timeout, skipped }` and optionally calls `onImageProcessed(img, info)` per image.
    - Uses `awaitSizeProbes` and `sizeProbeTimeoutMs` to control async sizing.

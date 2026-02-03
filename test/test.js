@@ -75,6 +75,17 @@ try {
   console.log('H: ' + h0 +'C: ' + c0);
 };
 
+const mdDir = mdit().use(mditRendererImage, { ...commonOpt, mdPath: __dirname });
+const hDir = mdDir.render('![A cat](cat.jpg)', {});
+const cDir = '<p><img src="cat.jpg" alt="A cat" width="400" height="300"></p>\n';
+try {
+  assert.ok(htmlMatches(hDir, cDir));
+} catch(e) {
+  pass = false
+  console.log('incorrect(mdPath dir): ');
+  console.log('H: ' + hDir +'C: ' + cDir);
+};
+
 const hResizeDataAttr = mdResizeDataAttr.render('![Figure](cat.jpg "resize:50%")', {'mdPath': mdPat});
 const cResizeDataAttr = '<p><img src="cat.jpg" alt="Figure" width="200" height="150" data-img-resize="50%"></p>\n';
 try {

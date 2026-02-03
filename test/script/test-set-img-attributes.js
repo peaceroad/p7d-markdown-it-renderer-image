@@ -887,4 +887,66 @@ await runTest(38, 'enableSizeProbe false skips size probing', async () => {
   assert.strictEqual(result.summary.sized, 0)
 })
 
+// Test 39: loadSrcStrategy raw uses raw src even when output is rewritten
+await runTest(39, 'loadSrcStrategy raw uses raw src', async () => {
+  const images = [
+    new MockElement('img', { src: 'cats/cat.jpg', alt: 'cat' })
+  ]
+  const markdownWithYaml = `---
+url: https://example.com/page
+urlimage: https://cdn.example.com/assets/
+---`
+  const loadSrcs = []
+  await testSetImageAttributes(
+    images,
+    { loadSrcStrategy: 'raw' },
+    markdownWithYaml,
+    null,
+    (value) => loadSrcs.push(value)
+  )
+
+  assert.ok(loadSrcs.includes('cats/cat.jpg'))
+})
+
+// Test 40: loadSrcStrategy display uses display src in previewMode markdown
+await runTest(40, 'loadSrcStrategy display uses preview display src', async () => {
+  const images = [
+    new MockElement('img', { src: 'cats/cat.jpg', alt: 'cat' })
+  ]
+  const markdownWithYaml = `---
+url: https://example.com/page
+urlimage: https://cdn.example.com/assets/
+---`
+  const loadSrcs = []
+  await testSetImageAttributes(
+    images,
+    { previewMode: 'markdown', loadSrcStrategy: 'display' },
+    markdownWithYaml,
+    null,
+    (value) => loadSrcs.push(value)
+  )
+
+  assert.ok(loadSrcs.includes('cats/cat.jpg'))
+})
+
+// Test 41: loadSrcPrefixMap rewrites loadSrc before probing
+await runTest(41, 'loadSrcPrefixMap rewrites loadSrc', async () => {
+  const images = [
+    new MockElement('img', { src: 'cats/cat.jpg', alt: 'cat' })
+  ]
+  const loadSrcs = []
+  await testSetImageAttributes(
+    images,
+    {
+      loadSrcStrategy: 'raw',
+      loadSrcPrefixMap: { 'cats/': 'blob:cats/' }
+    },
+    null,
+    null,
+    (value) => loadSrcs.push(value)
+  )
+
+  assert.ok(loadSrcs.includes('blob:cats/cat.jpg'))
+})
+
 console.log('All tests passed')

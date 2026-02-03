@@ -47,6 +47,24 @@ const removeAttrIfPresent = (element, name) => {
   element.removeAttribute(name)
 }
 const originalSrcAttr = 'data-img-src-raw'
+const normalizePrefixMap = (value) => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return []
+  const entries = []
+  for (const [from, to] of Object.entries(value)) {
+    if (!from || typeof from !== 'string') continue
+    if (typeof to !== 'string') continue
+    entries.push([from, to])
+  }
+  return entries.sort((a, b) => b[0].length - a[0].length)
+}
+const applyPrefixMap = (value, entries) => {
+  const text = String(value || '')
+  if (!text || !entries || entries.length === 0) return text
+  for (const [from, to] of entries) {
+    if (text.startsWith(from)) return to + text.slice(from.length)
+  }
+  return text
+}
 const collectImages = (root) => {
   if (!root) return []
   if (Array.isArray(root)) return root
@@ -122,6 +140,7 @@ export const createContext = async (markdownCont = '', option = {}, root = null)
     setBool('awaitSizeProbes', rendererSettings.awaitSizeProbes)
     setBool('suppressNoopWarning', rendererSettings.suppressNoopWarning)
     setString('previewMode', rendererSettings.previewMode)
+    setString('loadSrcStrategy', rendererSettings.loadSrcStrategy)
     setString('urlImageBase', rendererSettings.urlImageBase)
     setString('outputUrlMode', rendererSettings.outputUrlMode)
     setString('checkImgExtensions', rendererSettings.checkImgExtensions)
@@ -131,6 +150,7 @@ export const createContext = async (markdownCont = '', option = {}, root = null)
     setFunc('loadSrcResolver', rendererSettings.loadSrcResolver)
     setFunc('onImageProcessed', rendererSettings.onImageProcessed)
     setObject('loadSrcMap', rendererSettings.loadSrcMap)
+    setObject('loadSrcPrefixMap', rendererSettings.loadSrcPrefixMap)
     setNumber('sizeProbeTimeoutMs', rendererSettings.sizeProbeTimeoutMs)
 
     if (!optionOverrides.has('autoHideResizeTitle') && typeof rendererSettings.autoHideResizeTitle === 'boolean') {
@@ -184,6 +204,12 @@ export const createContext = async (markdownCont = '', option = {}, root = null)
     console.warn(`[renderer-image(dom)] Invalid previewMode: ${currentOpt.previewMode}. Using 'output'.`)
     currentOpt.previewMode = 'output'
   }
+  if (currentOpt.loadSrcStrategy === 'final') currentOpt.loadSrcStrategy = 'output'
+  const allowedLoadSrcStrategies = new Set(['output', 'raw', 'display'])
+  if (!allowedLoadSrcStrategies.has(currentOpt.loadSrcStrategy)) {
+    console.warn(`[renderer-image(dom)] Invalid loadSrcStrategy: ${currentOpt.loadSrcStrategy}. Using 'output'.`)
+    currentOpt.loadSrcStrategy = 'output'
+  }
   if (!Number.isFinite(currentOpt.sizeProbeTimeoutMs) || currentOpt.sizeProbeTimeoutMs < 0) {
     currentOpt.sizeProbeTimeoutMs = 0
   }
@@ -225,6 +251,7 @@ export const createContext = async (markdownCont = '', option = {}, root = null)
   const loadSrcMap = currentOpt.loadSrcMap && typeof currentOpt.loadSrcMap === 'object'
     ? currentOpt.loadSrcMap
     : null
+  const loadSrcPrefixEntries = normalizePrefixMap(currentOpt.loadSrcPrefixMap)
   const onImageProcessed = typeof currentOpt.onImageProcessed === 'function' ? currentOpt.onImageProcessed : null
 
   return {
@@ -237,6 +264,7 @@ export const createContext = async (markdownCont = '', option = {}, root = null)
     outputSrcAttr,
     loadSrcResolver,
     loadSrcMap,
+    loadSrcPrefixEntries,
     imageDir,
     hasImageDir,
     imageScale,
@@ -277,6 +305,7 @@ export const applyImageTransforms = async (root, contextOrOptions = {}, markdown
     outputSrcAttr,
     loadSrcResolver,
     loadSrcMap,
+    loadSrcPrefixEntries,
     imageDir,
     hasImageDir,
     imageScale,
@@ -443,6 +472,23 @@ export const applyImageTransforms = async (root, contextOrOptions = {}, markdown
     } else if (!adjustedLmd || !isLocalSrc) {
       loadSrc = finalSrc
     }
+
+    let displaySrc = finalSrc
+    if (currentOpt.previewMode === 'markdown' && isLocalSrc) {
+      displaySrc = storedOriginalSrc || srcRaw
+    }
+    if (currentOpt.previewMode === 'local' && isLocalSrc) {
+      displaySrc = localDisplaySrc || storedOriginalSrc || srcRaw
+    }
+
+    if (currentOpt.loadSrcStrategy === 'raw') {
+      loadSrc = srcRaw
+    } else if (currentOpt.loadSrcStrategy === 'display') {
+      loadSrc = displaySrc
+    }
+    if (loadSrcPrefixEntries.length) {
+      loadSrc = applyPrefixMap(loadSrc, loadSrcPrefixEntries)
+    }
     if (loadSrcResolver) {
       const resolved = loadSrcResolver(srcRaw, {
         finalSrc,
@@ -458,14 +504,6 @@ export const applyImageTransforms = async (root, contextOrOptions = {}, markdown
       if (typeof mapped === 'string' && mapped) {
         loadSrc = mapped
       }
-    }
-
-    let displaySrc = finalSrc
-    if (currentOpt.previewMode === 'markdown' && isLocalSrc) {
-      displaySrc = storedOriginalSrc || srcRaw
-    }
-    if (currentOpt.previewMode === 'local' && isLocalSrc) {
-      displaySrc = localDisplaySrc || storedOriginalSrc || srcRaw
     }
 
     if (currentOpt.previewMode !== 'output') {
