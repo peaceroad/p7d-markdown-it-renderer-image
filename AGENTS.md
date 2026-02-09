@@ -14,11 +14,13 @@
 4. Frontmatter resolution and base URL are cached per render to avoid recompute.
 
 ## script/set-img-attributes.js (browser)
-1. Exports `createContext`, `applyImageTransforms`, `applyImageTransformsToString`, and `startObserver`.
+1. Exports `createContext`, `applyImageTransforms`, `applyImageTransformsToString`, `startObserver`, and `runInPreview`.
    - Also exports `defaultSharedOptions`, `defaultDomOptions`, `defaultNodeOptions` for shared defaults.
-   - Default export is a no-op shim; `suppressNoopWarning` silences the browser warning.
+   - `runInPreview({ root, markdownCont, observe, ... })` is a high-level helper for preview usage (create context + apply + optional observer).
+   - Default export is a no-op shim returning `Promise.resolve()`; `suppressNoopWarning` silences the browser warning.
 2. `createContext(markdownCont, options, root)` parses options and YAML frontmatter (`url`/`urlimage`/`urlimagebase`/`lid`/`lmd`/`imagescale`, lowercase only) and optionally reads `meta[name="markdown-frontmatter"]` when `readMeta: true` (merging `_extensionSettings.rendererImage` unless disabled).
 3. `applyImageTransforms(root, contextOrOptions)`:
+   - `root` accepts a document/container, a single `<img>`, or an iterable of `<img>` elements.
    - Applies path rewriting when `resolveSrc: true`, using image base (`urlimage` absolute > `urlimagebase` + url path > `url`, with `urlImageBase` option as fallback). Relative `urlimage` is treated as an image directory (basename only).
    - `lmd` handling: keep existing URL schemes; if `lmd` is an absolute local path, convert to `file:///` with URL-encoded segments and a trailing slash; relative `lmd` stays relative.
    - `previewMode`: `output` | `markdown` | `local`. When not `output`, store final URL in `previewOutputSrcAttr` and cache original `src` in `data-img-src-raw`.
@@ -34,6 +36,7 @@
 
 ## Utilities (script/img-util.js)
 - Frontmatter parsing, path normalization, resize/scaleSuffix regexes, image base resolution, and size adjustment (`setImgSize`).
+- Frontmatter normalization removes only a leading `./` (not arbitrary single-character prefixes).
 - URL path extraction treats only `.html`, `.htm`, `.xhtml` as file names; other dotted segments are kept as directories.
 - Shared URL helpers (scheme checks, basename, extension regex, `applyOutputUrlMode`) are centralized here and used by both Node and DOM.
 - `safeDecodeUri` avoids decoding `%2F/%5C` to keep path segmentation stable while still handling non-ASCII filenames.

@@ -39,25 +39,27 @@ console.log(html)
 
 ```html
 <script type="module">
-import { createContext, applyImageTransforms, applyImageTransformsToString, startObserver } from '<package>/script/set-img-attributes.js'
+import { runInPreview, applyImageTransformsToString } from '<package>/script/set-img-attributes.js'
 
-const context = await createContext(markdownCont, {
+const { observer } = await runInPreview({
+  root: document,
+  markdownCont,
   readMeta: true, // read frontmatter from <meta>
+  observe: true,  // start MutationObserver
 })
 
-// Apply once
-await applyImageTransforms(document, context)
-
-// Or observe mutations
-startObserver(document, context)
-
 // Process an HTML string (e.g. source view)
-const transformed = await applyImageTransformsToString(htmlSource, context)
+const transformed = await applyImageTransformsToString(htmlSource, { readMeta: true }, markdownCont)
+
+// Stop observing when needed
+observer?.disconnect()
 </script>
 ```
 
 Notes:
 - The DOM helper provides named functions; the default export is a no-op compatibility shim.
+- `runInPreview({ root, markdownCont, observe, ...options })` is a high-level helper for preview flows (create context + apply + optional observer).
+- The default-export no-op returns a resolved Promise for safer `.catch(...)` chaining in accidental async usage.
 - The no-op warning is shown once in non-production. Set `suppressNoopWarning: true` to silence it.
 - In browser builds, importing the package root resolves to the DOM helper (named exports + no-op default). Use the script path if you want to be explicit.
 - Default option objects are exported (`defaultSharedOptions`, `defaultDomOptions`, `defaultNodeOptions`) to keep CLI and DOM configs in sync.
@@ -68,15 +70,19 @@ Notes:
 Example (bundler or app code that rerenders HTML):
 
 ```js
-import { createContext, applyImageTransforms } from '@peaceroad/markdown-it-renderer-image/script/set-img-attributes.js'
+import { runInPreview } from '@peaceroad/markdown-it-renderer-image/script/set-img-attributes.js'
 import { defaultDomOptions } from '@peaceroad/markdown-it-renderer-image'
 
 txt.addEventListener('input', async () => {
   const markdownCont = txt.value
   html.innerHTML = renderedHtml
 
-  const context = await createContext(markdownCont, { ...defaultDomOptions, readMeta: true }, html)
-  await applyImageTransforms(html, context, markdownCont)
+  await runInPreview({
+    root: html,
+    markdownCont,
+    ...defaultDomOptions,
+    readMeta: true,
+  })
 })
 ```
 

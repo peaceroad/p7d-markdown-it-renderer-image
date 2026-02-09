@@ -254,6 +254,11 @@ try {
   assert.strictEqual(fm.urlimage, '')
   assert.strictEqual(fm.lid, '')
   assert.strictEqual(fm.lmd, '')
+  const fmRelativeLid = getFrontmatter({ lid: 'a/path' }, {})
+  assert.strictEqual(fmRelativeLid.lid, 'a/path/')
+  const fmRelativeImageDir = getFrontmatter({ urlimage: 'a/path' }, {})
+  assert.strictEqual(fmRelativeImageDir.hasImageDir, true)
+  assert.strictEqual(fmRelativeImageDir.imageDir, 'a/path/')
 } catch (e) {
   pass = false
   console.log('incorrect(non-string guards): ')

@@ -18,6 +18,9 @@ const isWindows = (process.platform === 'win32')
 if (isWindows) {
   __dirname = __dirname.replace(/^\/+/, '').replace(/\//g, '\\')
 }
+const scriptPath = path.resolve(__dirname, '../../script/set-img-attributes.js')
+const scriptUrl = new URL(`file:///${scriptPath.replace(/\\/g, '/')}`).href
+const loadDomModule = () => import(scriptUrl)
 
 // Lightweight DOM element mock
 class MockElement {
@@ -51,16 +54,6 @@ class MockElement {
   get src() { return this.getAttribute('src') }
   get alt() { return this.getAttribute('alt') }
   get title() { return this.getAttribute('title') }
-}
-
-// Mock Image constructor for Node.js environment
-class MockImage extends MockElement {
-  constructor() {
-    super('img')
-    this.complete = true
-    this.naturalWidth = 800
-    this.naturalHeight = 600
-  }
 }
 
 // Lightweight document mock
@@ -135,9 +128,7 @@ const testSetImageAttributes = async (images, options = {}, markdownContent = nu
   
   try {
     // Dynamic import setImageAttributes (after mocking)
-    const scriptPath = path.resolve(__dirname, '../../script/set-img-attributes.js')
-    const scriptUrl = new URL(`file:///${scriptPath.replace(/\\/g, '/')}`).href
-    const mod = await import(scriptUrl)
+    const mod = await loadDomModule()
     const context = await mod.createContext(markdownContent, { autoHideResizeTitle: false, ...options }, global.document)
     const summary = await mod.applyImageTransforms(global.document, context)
     
@@ -313,9 +304,7 @@ await runTest(8, 'Error handling', async () => {
   }
   
   try {
-    const scriptPath = path.resolve(__dirname, '../../script/set-img-attributes.js')
-    const scriptUrl = new URL(`file:///${scriptPath.replace(/\\/g, '/')}`).href
-    const mod = await import(scriptUrl)
+    const mod = await loadDomModule()
     const context = await mod.createContext('', { autoHideResizeTitle: false, lazyLoad: true, asyncDecode: true }, global.document)
     await mod.applyImageTransforms(global.document, context)
     
@@ -363,9 +352,7 @@ await runTest(8.5, 'file:// auto suppresses local errors', async () => {
     }
   }
   try {
-    const scriptPath = path.resolve(__dirname, '../../script/set-img-attributes.js')
-    const scriptUrl = new URL(`file:///${scriptPath.replace(/\\/g, '/')}`).href
-    const mod = await import(scriptUrl)
+    const mod = await loadDomModule()
     const context = await mod.createContext('', {}, global.document)
     await mod.applyImageTransforms(global.document, context)
     assert.strictEqual(errorCount, 0)
@@ -947,6 +934,252 @@ await runTest(41, 'loadSrcPrefixMap rewrites loadSrc', async () => {
   )
 
   assert.ok(loadSrcs.includes('blob:cats/cat.jpg'))
+})
+
+// Test 42: default export no-op returns Promise for safe chaining
+await runTest(42, 'Default export no-op returns Promise', async () => {
+  const mod = await loadDomModule()
+  const ret = mod.default(null, { suppressNoopWarning: true })
+  assert.ok(ret && typeof ret.then === 'function')
+  let catchCalled = false
+  await ret.catch(() => { catchCalled = true })
+  assert.strictEqual(catchCalled, false)
+})
+
+// Test 43: runInPreview applies transforms and returns context/summary
+await runTest(43, 'runInPreview applies transforms', async () => {
+  const images = [
+    new MockElement('img', { src: 'cat.jpg', alt: 'cat' })
+  ]
+  const originalDocument = global.document
+  const originalImage = global.Image
+  global.document = createMockDocument(images)
+  global.Image = class DynamicMockImage extends MockElement {
+    constructor() {
+      super('img')
+      this.complete = true
+      this.naturalWidth = 800
+      this.naturalHeight = 600
+      this.onload = null
+      this.onerror = null
+    }
+    setAttribute(name, value) {
+      super.setAttribute(name, value)
+      if (name === 'src') {
+        this.complete = true
+        if (this.onload) {
+          setTimeout(() => this.onload(), 0)
+        }
+      }
+    }
+  }
+  try {
+    const mod = await loadDomModule()
+    const result = await mod.runInPreview({
+      root: global.document,
+      markdownCont: '',
+      resize: true,
+    })
+    assert.ok(result.context && result.context.opt)
+    assert.strictEqual(result.summary.total, 1)
+    assert.strictEqual(result.summary.processed, 1)
+    assert.strictEqual(result.summary.sized, 1)
+    assert.strictEqual(result.observer, null)
+    assert.strictEqual(images[0].getAttribute('width'), '800')
+    assert.strictEqual(images[0].getAttribute('height'), '600')
+  } finally {
+    global.document = originalDocument
+    global.Image = originalImage
+  }
+})
+
+// Test 44: runInPreview observe=true starts observer
+await runTest(44, 'runInPreview observe starts MutationObserver', async () => {
+  const images = [
+    new MockElement('img', { src: 'cat.jpg', alt: 'cat' })
+  ]
+  const originalDocument = global.document
+  const originalImage = global.Image
+  const originalMutationObserver = global.MutationObserver
+  let lastObserver = null
+
+  global.document = createMockDocument(images)
+  global.Image = class DynamicMockImage extends MockElement {
+    constructor() {
+      super('img')
+      this.complete = true
+      this.naturalWidth = 800
+      this.naturalHeight = 600
+      this.onload = null
+      this.onerror = null
+    }
+    setAttribute(name, value) {
+      super.setAttribute(name, value)
+      if (name === 'src' && this.onload) setTimeout(() => this.onload(), 0)
+    }
+  }
+  global.MutationObserver = class MockMutationObserver {
+    constructor(callback) {
+      this.callback = callback
+      this.disconnected = false
+      this.target = null
+      this.options = null
+      lastObserver = this
+    }
+    observe(target, options) {
+      this.target = target
+      this.options = options
+    }
+    disconnect() {
+      this.disconnected = true
+    }
+  }
+
+  try {
+    const mod = await loadDomModule()
+    const result = await mod.runInPreview({
+      root: global.document,
+      markdownCont: '',
+      observe: true,
+    })
+    assert.ok(result.observer && typeof result.observer.disconnect === 'function')
+    assert.ok(lastObserver && lastObserver.target)
+    assert.ok(Array.isArray(lastObserver.options.attributeFilter))
+    assert.ok(lastObserver.options.attributeFilter.includes('src'))
+    result.observer.disconnect()
+    assert.strictEqual(lastObserver.disconnected, true)
+  } finally {
+    global.document = originalDocument
+    global.Image = originalImage
+    if (originalMutationObserver === undefined) {
+      delete global.MutationObserver
+    } else {
+      global.MutationObserver = originalMutationObserver
+    }
+  }
+})
+
+// Test 45: loadSrcResolver errors are handled without aborting transforms
+await runTest(45, 'loadSrcResolver errors do not abort', async () => {
+  const images = [
+    new MockElement('img', { src: 'cat.jpg', alt: 'cat' })
+  ]
+  const originalConsoleError = console.error
+  let hookErrorLogged = false
+  console.error = (...args) => {
+    if (String(args[0] || '').includes('loadSrcResolver hook failed')) {
+      hookErrorLogged = true
+    }
+  }
+  try {
+    const result = await testSetImageAttributes(
+      images,
+      {
+        resize: true,
+        loadSrcResolver: () => {
+          throw new Error('resolver failed')
+        },
+      },
+      null,
+      null,
+      null,
+      true
+    )
+    assert.strictEqual(result.summary.sized, 1)
+    assert.ok(hookErrorLogged)
+  } finally {
+    console.error = originalConsoleError
+  }
+})
+
+// Test 46: onImageProcessed errors are handled without aborting transforms
+await runTest(46, 'onImageProcessed errors do not abort', async () => {
+  const images = [
+    new MockElement('img', { src: 'cat.jpg', alt: 'cat' })
+  ]
+  const originalConsoleError = console.error
+  let hookErrorLogged = false
+  console.error = (...args) => {
+    if (String(args[0] || '').includes('onImageProcessed hook failed')) {
+      hookErrorLogged = true
+    }
+  }
+  try {
+    const result = await testSetImageAttributes(
+      images,
+      {
+        onImageProcessed: () => {
+          throw new Error('onImageProcessed failed')
+        },
+      },
+      null,
+      null,
+      null,
+      true
+    )
+    assert.strictEqual(result.summary.processed, 1)
+    assert.ok(hookErrorLogged)
+  } finally {
+    console.error = originalConsoleError
+  }
+})
+
+// Test 47: startObserver fallback without MutationObserver
+await runTest(47, 'startObserver fallback without MutationObserver', async () => {
+  const mod = await loadDomModule()
+  const originalMutationObserver = global.MutationObserver
+  try {
+    delete global.MutationObserver
+    const controller = await mod.startObserver(createMockDocument([]), {})
+    assert.ok(controller && typeof controller.disconnect === 'function')
+    controller.disconnect()
+  } finally {
+    if (originalMutationObserver === undefined) {
+      delete global.MutationObserver
+    } else {
+      global.MutationObserver = originalMutationObserver
+    }
+  }
+})
+
+// Test 48: runInPreview validates required root
+await runTest(48, 'runInPreview validates root', async () => {
+  const mod = await loadDomModule()
+  await assert.rejects(() => mod.runInPreview({}), /runInPreview requires root/)
+})
+
+// Test 49: single IMG root is processed directly
+await runTest(49, 'Single IMG root is processed', async () => {
+  const img = new MockElement('img', { src: 'cat.jpg', alt: 'cat' })
+  const originalImage = global.Image
+  global.Image = class DynamicMockImage extends MockElement {
+    constructor() {
+      super('img')
+      this.complete = true
+      this.naturalWidth = 800
+      this.naturalHeight = 600
+      this.onload = null
+      this.onerror = null
+    }
+    setAttribute(name, value) {
+      super.setAttribute(name, value)
+      if (name === 'src' && this.onload) {
+        setTimeout(() => this.onload(), 0)
+      }
+    }
+  }
+  try {
+    const mod = await loadDomModule()
+    const context = await mod.createContext('', { resize: true }, null)
+    const summary = await mod.applyImageTransforms(img, context)
+    assert.strictEqual(summary.total, 1)
+    assert.strictEqual(summary.processed, 1)
+    assert.strictEqual(summary.sized, 1)
+    assert.strictEqual(img.getAttribute('width'), '800')
+    assert.strictEqual(img.getAttribute('height'), '600')
+  } finally {
+    global.Image = originalImage
+  }
 })
 
 console.log('All tests passed')

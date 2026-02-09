@@ -47,6 +47,32 @@ const removeAttrIfPresent = (element, name) => {
   element.removeAttribute(name)
 }
 const originalSrcAttr = 'data-img-src-raw'
+const observedImgAttributes = new Set(['src', 'title', 'alt'])
+const allowedPreviewModes = new Set(['output', 'markdown', 'local'])
+const allowedLoadSrcStrategies = new Set(['output', 'raw', 'display'])
+const emptySummary = Object.freeze({
+  total: 0,
+  processed: 0,
+  pending: 0,
+  sized: 0,
+  failed: 0,
+  timeout: 0,
+  skipped: 0,
+})
+const createSummary = (total = 0) => ({
+  ...emptySummary,
+  total,
+})
+const safeInvokeImageProcessed = (handler, img, info, suppressErrors = false) => {
+  if (!handler) return
+  try {
+    handler(img, info)
+  } catch (error) {
+    if (!suppressErrors && typeof console !== 'undefined' && console && typeof console.error === 'function') {
+      console.error('[renderer-image(dom)] onImageProcessed hook failed.', error)
+    }
+  }
+}
 const normalizePrefixMap = (value) => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return []
   const entries = []
@@ -65,12 +91,13 @@ const applyPrefixMap = (value, entries) => {
   }
   return text
 }
+const isImgTag = (node) => !!(node && typeof node.tagName === 'string' && node.tagName.toUpperCase() === 'IMG')
 const collectImages = (root) => {
   if (!root) return []
-  if (Array.isArray(root)) return root
+  if (Array.isArray(root)) return root.filter(isImgTag)
+  if (isImgTag(root)) return [root]
   if (typeof root.querySelectorAll === 'function') return Array.from(root.querySelectorAll('img'))
-  if (root.tagName === 'IMG') return [root]
-  if (typeof root.length === 'number' && typeof root[Symbol.iterator] === 'function') return Array.from(root)
+  if (typeof root.length === 'number' && typeof root[Symbol.iterator] === 'function') return Array.from(root).filter(isImgTag)
   return []
 }
 
@@ -199,13 +226,11 @@ export const createContext = async (markdownCont = '', option = {}, root = null)
   if (isFileProtocol && !enableSizeProbeOverridden) {
     currentOpt.enableSizeProbe = false
   }
-  const allowedPreviewModes = new Set(['output', 'markdown', 'local'])
   if (!allowedPreviewModes.has(currentOpt.previewMode)) {
     console.warn(`[renderer-image(dom)] Invalid previewMode: ${currentOpt.previewMode}. Using 'output'.`)
     currentOpt.previewMode = 'output'
   }
   if (currentOpt.loadSrcStrategy === 'final') currentOpt.loadSrcStrategy = 'output'
-  const allowedLoadSrcStrategies = new Set(['output', 'raw', 'display'])
   if (!allowedLoadSrcStrategies.has(currentOpt.loadSrcStrategy)) {
     console.warn(`[renderer-image(dom)] Invalid loadSrcStrategy: ${currentOpt.loadSrcStrategy}. Using 'output'.`)
     currentOpt.loadSrcStrategy = 'output'
@@ -293,7 +318,7 @@ export const applyImageTransforms = async (root, contextOrOptions = {}, markdown
   const context = contextOrOptions && contextOrOptions.opt
     ? contextOrOptions
     : await createContext(markdownCont, contextOrOptions, root)
-  if (context.skip) return { total: 0, processed: 0, pending: 0, sized: 0, failed: 0, timeout: 0, skipped: 0 }
+  if (context.skip) return createSummary()
 
   const {
     opt: currentOpt,
@@ -328,15 +353,7 @@ export const applyImageTransforms = async (root, contextOrOptions = {}, markdown
   } = utils
 
   const images = collectImages(root)
-  const summary = {
-    total: images.length,
-    processed: 0,
-    pending: 0,
-    sized: 0,
-    failed: 0,
-    timeout: 0,
-    skipped: 0,
-  }
+  const summary = createSummary(images.length)
 
   const probeImage = (img, payload) => {
     const {
@@ -367,7 +384,7 @@ export const applyImageTransforms = async (root, contextOrOptions = {}, markdown
           finalSrc: payload.finalSrc,
           displaySrc: payload.displaySrc,
         }
-        if (onImageProcessed) onImageProcessed(img, info)
+        safeInvokeImageProcessed(onImageProcessed, img, info, currentOpt.suppressErrors === 'all')
         resolve(info)
       }
 
@@ -490,14 +507,20 @@ export const applyImageTransforms = async (root, contextOrOptions = {}, markdown
       loadSrc = applyPrefixMap(loadSrc, loadSrcPrefixEntries)
     }
     if (loadSrcResolver) {
-      const resolved = loadSrcResolver(srcRaw, {
-        finalSrc,
-        loadSrc,
-        isLocalSrc,
-        isRemote: isHttpUrl(loadSrc) || isProtocolRelativeUrl(loadSrc),
-      })
-      if (typeof resolved === 'string' && resolved) {
-        loadSrc = resolved
+      try {
+        const resolved = loadSrcResolver(srcRaw, {
+          finalSrc,
+          loadSrc,
+          isLocalSrc,
+          isRemote: isHttpUrl(loadSrc) || isProtocolRelativeUrl(loadSrc),
+        })
+        if (typeof resolved === 'string' && resolved) {
+          loadSrc = resolved
+        }
+      } catch (error) {
+        if (currentOpt.suppressErrors !== 'all') {
+          console.error('[renderer-image(dom)] loadSrcResolver hook failed.', error)
+        }
       }
     } else if (loadSrcMap) {
       const mapped = loadSrcMap[srcRaw] || loadSrcMap[finalSrc]
@@ -565,26 +588,22 @@ export const applyImageTransforms = async (root, contextOrOptions = {}, markdown
     const sizeSrc = finalSrc || srcRaw || loadSrc
     if (!sizeSrc || !imgExtReg.test(sizeSrc)) {
       summary.skipped += 1
-      if (onImageProcessed) {
-        onImageProcessed(img, {
-          status: 'skipped',
-          loadSrc,
-          finalSrc,
-          displaySrc,
-        })
-      }
+      safeInvokeImageProcessed(onImageProcessed, img, {
+        status: 'skipped',
+        loadSrc,
+        finalSrc,
+        displaySrc,
+      }, currentOpt.suppressErrors === 'all')
       continue
     }
     if (!currentOpt.enableSizeProbe) {
       summary.skipped += 1
-      if (onImageProcessed) {
-        onImageProcessed(img, {
-          status: 'skipped',
-          loadSrc,
-          finalSrc,
-          displaySrc,
-        })
-      }
+      safeInvokeImageProcessed(onImageProcessed, img, {
+        status: 'skipped',
+        loadSrc,
+        finalSrc,
+        displaySrc,
+      }, currentOpt.suppressErrors === 'all')
       continue
     }
 
@@ -657,7 +676,11 @@ export const startObserver = async (root, contextOrOptions = {}, markdownCont = 
     scheduled = true
     const run = () => {
       scheduled = false
-      runProcess()
+      runProcess().catch((error) => {
+        if (context?.opt?.suppressErrors !== 'all') {
+          console.error('[renderer-image(dom)] MutationObserver processing failed.', error)
+        }
+      })
     }
     if (typeof requestAnimationFrame === 'function') {
       requestAnimationFrame(run)
@@ -671,7 +694,7 @@ export const startObserver = async (root, contextOrOptions = {}, markdownCont = 
     if (!context?.opt?.readMeta || !isElementNode(node)) return false
     return node.tagName === 'META' && node.getAttribute('name') === 'markdown-frontmatter'
   }
-  const isImageNode = (node) => isElementNode(node) && node.tagName === 'IMG'
+  const isImageNode = (node) => isElementNode(node) && isImgTag(node)
 
   const collectImagesFromNodes = (nodes) => {
     if (!nodes) return
@@ -708,7 +731,7 @@ export const startObserver = async (root, contextOrOptions = {}, markdownCont = 
       if (!mutation) continue
       if (mutation.type === 'attributes') {
         const target = mutation.target
-        if (isImageNode(target) && ['src', 'title', 'alt'].includes(mutation.attributeName)) {
+        if (isImageNode(target) && observedImgAttributes.has(mutation.attributeName)) {
           pendingImages.add(target)
           shouldSchedule = true
           continue
@@ -758,6 +781,33 @@ export const startObserver = async (root, contextOrOptions = {}, markdownCont = 
 }
 
 /**
+ * High-level helper for live previews.
+ * Creates context, applies transforms once, and optionally starts observation.
+ */
+export const runInPreview = async (setup = {}) => {
+  const safeSetup = setup && typeof setup === 'object' ? setup : {}
+  const root = safeSetup.root
+  if (!root) throw new Error('[renderer-image(dom)] runInPreview requires root.')
+
+  const markdownCont = typeof safeSetup.markdownCont === 'string' ? safeSetup.markdownCont : ''
+  const observe = !!safeSetup.observe
+  const providedContext = safeSetup.context && safeSetup.context.opt ? safeSetup.context : null
+
+  const {
+    root: _root,
+    markdownCont: _markdownCont,
+    observe: _observe,
+    context: _context,
+    ...option
+  } = safeSetup
+
+  const context = providedContext || await createContext(markdownCont, option, root)
+  const summary = await applyImageTransforms(root, context)
+  const observer = observe ? await startObserver(root, context, markdownCont) : null
+  return { context, summary, observer }
+}
+
+/**
  * Applies image transforms to an HTML string using DOMParser.
  * Useful for source views or processing HTML without mounting it to the main DOM.
  */
@@ -778,11 +828,12 @@ const shouldSuppressNoopWarning = (option) => {
   return false
 }
 const mditRendererImageBrowser = (_md, _option) => {
-  if (warnedDefaultExport || shouldSuppressNoopWarning(_option)) return
+  if (warnedDefaultExport || shouldSuppressNoopWarning(_option)) return Promise.resolve()
   if (typeof console !== 'undefined' && console && typeof console.warn === 'function') {
-    console.warn('[renderer-image(dom)] Default export is a no-op in the browser. Use createContext/applyImageTransforms/startObserver instead.')
+    console.warn('[renderer-image(dom)] Default export is a no-op in the browser. Use createContext/applyImageTransforms/startObserver/runInPreview instead.')
   }
   warnedDefaultExport = true
+  return Promise.resolve()
 }
 
 export default mditRendererImageBrowser

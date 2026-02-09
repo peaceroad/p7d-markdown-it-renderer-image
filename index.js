@@ -57,7 +57,7 @@ const resolveMdDir = (value) => {
   return text
 }
 
-const getLocalImgSrc = (imgSrc, opt, env) => {
+const getLocalImgSrc = (imgSrc, mdDir) => {
   if (!imgSrc) return ''
   if (isProtocolRelativeUrl(imgSrc)) return ''
   if (hasSpecialScheme(imgSrc)) return ''
@@ -68,17 +68,11 @@ const getLocalImgSrc = (imgSrc, opt, env) => {
       return ''
     }
   }
-  let dirPath = ''
-  if (opt.mdPath) {
-    dirPath = resolveMdDir(opt.mdPath)
-  } else if (env?.mdPath) {
-    dirPath = resolveMdDir(env.mdPath)
-  }
-  if (dirPath === '') return ''
+  if (mdDir === '') return ''
   const cleanSrc = stripQueryHash(imgSrc)
   const decodedSrc = safeDecodeUri(cleanSrc)
   const finalSrc = decodedSrc === cleanSrc ? cleanSrc : decodedSrc
-  return path.resolve(dirPath, finalSrc.replace(/[/\\]/g, path.sep))
+  return path.resolve(mdDir, finalSrc.replace(/[/\\]/g, path.sep))
 }
 
 const getImgData = (src, isRemote, timeout, cache, cacheMax, failedSet, suppressLoadErrors, suppressLocalErrors, suppressRemoteErrors, remoteMaxBytes) => {
@@ -135,6 +129,14 @@ const mditRendererImage = (md, option) => {
     ? new RegExp('\\.(?:' + extPattern + ')(?=$|[?#])', 'i')
     : /a^/
   const remoteSizeEnabled = !opt.disableRemoteSize
+  const hasOptMdPath = !!opt.mdPath
+  const resolvedOptMdDir = hasOptMdPath ? resolveMdDir(opt.mdPath) : ''
+  const suppressLoadErrors = opt.suppressErrors === 'all'
+  const suppressLocalErrors = opt.suppressErrors === 'local' || opt.suppressErrors === 'all'
+  const suppressRemoteErrors = opt.suppressErrors === 'remote' || opt.suppressErrors === 'all'
+  const resizeDataAttr = typeof opt.resizeDataAttr === 'string' && opt.resizeDataAttr.trim()
+    ? opt.resizeDataAttr
+    : ''
 
   const stateCache = new WeakMap()
   const removeTokenAttr = (token, name) => {
@@ -159,11 +161,8 @@ const mditRendererImage = (md, option) => {
     return cached
   }
 
-  const processImageToken = (token, state, env, fmContext) => {
+  const processImageToken = (token, state, fmContext) => {
     const { imgDataCache, failedImgLoads, missingMdPathWarnings } = state
-    const suppressLoadErrors = opt.suppressErrors === 'all'
-    const suppressLocalErrors = opt.suppressErrors === 'local' || opt.suppressErrors === 'all'
-    const suppressRemoteErrors = opt.suppressErrors === 'remote' || opt.suppressErrors === 'all'
 
     const srcRaw = token.attrGet('src') || ''
     const srcBase = stripQueryHash(srcRaw)
@@ -173,10 +172,10 @@ const mditRendererImage = (md, option) => {
 
     const parsedFrontmatter = fmContext?.parsedFrontmatter || {}
     const imageScale = fmContext?.imageScale || null
-    const hasFrontmatter = fmContext?.hasFrontmatter || false
     const shouldParseFrontmatter = fmContext?.shouldParseFrontmatter || false
+    const mdDir = fmContext?.mdDir || ''
 
-    if (opt.resolveSrc && src && (hasFrontmatter || opt.urlImageBase)) {
+    if (opt.resolveSrc && src && shouldParseFrontmatter) {
       const { lid, imageDir, hasImageDir } = parsedFrontmatter
       const imageBase = fmContext?.imageBase || ''
 
@@ -209,7 +208,7 @@ const mditRendererImage = (md, option) => {
     const isFile = isFileUrl(srcRaw)
 
     if (isValidExt) {
-      const srcPath = isRemote ? toAbsoluteRemote(srcRaw) : getLocalImgSrc(srcBase, opt, env)
+      const srcPath = isRemote ? toAbsoluteRemote(srcRaw) : getLocalImgSrc(srcBase, mdDir)
       const canReadRemote = isRemote && remoteSizeEnabled
       const hasSrcPath = (isRemote && canReadRemote) || (!isRemote && srcPath)
 
@@ -250,8 +249,8 @@ const mditRendererImage = (md, option) => {
     if (titleRaw && !removeTitle) {
       token.attrSet('title', titleRaw)
     } else if (removeTitle) {
-      if (typeof opt.resizeDataAttr === 'string' && opt.resizeDataAttr.trim() && resizeValue) {
-        token.attrSet(opt.resizeDataAttr, resizeValue)
+      if (resizeDataAttr && resizeValue) {
+        token.attrSet(resizeDataAttr, resizeValue)
       }
       removeTokenAttr(token, 'title')
     }
@@ -262,6 +261,9 @@ const mditRendererImage = (md, option) => {
   md.core.ruler.after('replacements', 'renderer_image', (state) => {
     const cached = ensureState(state)
     const env = state?.env || {}
+    const mdDir = hasOptMdPath
+      ? resolvedOptMdDir
+      : (env?.mdPath ? resolveMdDir(env.mdPath) : '')
     const frontmatter = env?.frontmatter || md.env?.frontmatter
     const hasFrontmatter = !!(frontmatter && typeof frontmatter === 'object' && Object.keys(frontmatter).length > 0)
     const shouldParseFrontmatter = hasFrontmatter || !!opt.urlImageBase
@@ -280,18 +282,18 @@ const mditRendererImage = (md, option) => {
     const imageScale = shouldParseFrontmatter ? cached.imageScale : null
     const imageBase = cached.imageBase || ''
     const fmContext = {
-      hasFrontmatter,
       shouldParseFrontmatter,
       parsedFrontmatter,
       imageScale,
       imageBase,
+      mdDir,
     }
     const tokens = state.tokens || []
     for (const token of tokens) {
       if (token.type !== 'inline' || !token.children) continue
       for (const child of token.children) {
         if (child.type === 'image') {
-          processImageToken(child, cached, env, fmContext)
+          processImageToken(child, cached, fmContext)
         }
       }
     }
@@ -308,3 +310,4 @@ export const createContext = async () => browserOnlyApi('createContext')
 export const applyImageTransforms = async () => browserOnlyApi('applyImageTransforms')
 export const startObserver = async () => browserOnlyApi('startObserver')
 export const applyImageTransformsToString = async () => browserOnlyApi('applyImageTransformsToString')
+export const runInPreview = async () => browserOnlyApi('runInPreview')

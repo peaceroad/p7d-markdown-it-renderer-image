@@ -2,7 +2,7 @@ import assert from 'assert'
 import fs from 'fs'
 import path from 'path'
 import mdit from 'markdown-it'
-import mditRendererImage from '../index.js'
+import mditRendererImage, { runInPreview } from '../index.js'
 
 let __dirname = path.dirname(new URL(import.meta.url).pathname)
 const isWindows = (process.platform === 'win32')
@@ -51,6 +51,14 @@ const ms = loadExamples('examples.txt');
 const msHide = loadExamples('examples-hideTitle-default.txt');
 
 let pass = true
+
+try {
+  await assert.rejects(runInPreview(), /runInPreview is a browser-only API/)
+} catch (e) {
+  pass = false
+  console.log('incorrect(runInPreview browser-only guard): ')
+  console.log(e.message)
+}
 
 const isRemoteImgHtml = (html) => /<img[^>]+src="(?:https?:)?\/\/[^"]+"/i.test(html)
 const stripSizeAttrs = (html) => html.replace(/\s+width="[^"]*"/g, '').replace(/\s+height="[^"]*"/g, '')

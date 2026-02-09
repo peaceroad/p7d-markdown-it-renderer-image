@@ -286,7 +286,7 @@ const getFrontmatter = (frontmatter, opt) => {
   if (lid) lid = lid.replace(/\\/g, '/')
   if (lid) {
     if (!/\/$/.test(lid)) lid += '/'
-    if (/^.\//.test(lid)) lid = lid.replace(/^.\//, '')
+    if (/^\.\//.test(lid)) lid = lid.replace(/^\.\//, '')
   }
   let url = toText(frontmatter.url)
   if (url) {
@@ -311,7 +311,7 @@ const getFrontmatter = (frontmatter, opt) => {
   if (imageDir === '.' || imageDir === './') imageDir = ''
   if (imageDir) {
     if (!/\/$/.test(imageDir)) imageDir += '/'
-    if (/^.\//.test(imageDir)) imageDir = imageDir.replace(/^.\//, '')
+    if (/^\.\//.test(imageDir)) imageDir = imageDir.replace(/^\.\//, '')
     imageDir = imageDir.replace(/^\/+/, '')
   }
   let lmd = toText(frontmatter.lmd)
