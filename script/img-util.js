@@ -2,18 +2,29 @@ const scaleSuffixReg = /[@._-]([0-9]+)(x|dpi|ppi)$/
 const resizeReg = /(?:(?:(?:大きさ|サイズ)の?変更|リサイズ|resize(?:d to)?) *[:：]? *([0-9]+(?:\.[0-9]+)?)([%％]|px)|([0-9]+(?:\.[0-9]+)?)([%％]|px)[にへ](?:(?:大きさ|サイズ)を?変更|リサイズ))/i
 const resizeValueReg = /^([0-9]+(?:\.[0-9]+)?)(%|px)$/i
 const yamlReg = /^--- *\n([\s\S]*?)\n---/
+const percentEncodedReg = /%[0-9A-Fa-f]{2}/
+const encodedSlashReg = /%2f|%5c/i
+const httpUrlReg = /^https?:\/\//i
+const protocolRelativeReg = /^\/\//
+const fileUrlReg = /^file:\/\//i
+const urlSchemeReg = /^[a-z][a-z0-9+.-]*:\/\//i
+const specialSchemeReg = /^(data|blob|vscode-resource|vscode-webview-resource|vscode-file):/i
+const windowsAbsolutePathReg = /^[A-Za-z]:\//
+const absoluteUrlReg = /^(?:[a-z][a-z0-9+.-]*:)?\/\//i
+const htmlFileReg = /\.(html|htm|xhtml)$/i
+const urlPathReg = /^([a-z]+:\/\/)(.*)/
 
 const toText = (value) => {
   if (typeof value === 'string') return value
   if (value instanceof String) return value.valueOf()
   return ''
 }
-const hasPercentEncoded = (value) => /%[0-9A-Fa-f]{2}/.test(value)
 const safeDecodeUri = (value) => {
   const text = toText(value)
   if (!text) return ''
-  if (!hasPercentEncoded(text)) return text
-  if (/%2f|%5c/i.test(text)) return text
+  if (text.indexOf('%') === -1) return text
+  if (!percentEncodedReg.test(text)) return text
+  if (encodedSlashReg.test(text)) return text
   try {
     return decodeURI(text)
   } catch {
@@ -23,7 +34,12 @@ const safeDecodeUri = (value) => {
 const stripQueryHash = (value) => {
   const text = toText(value)
   if (!text) return ''
-  return text.split(/[?#]/)[0]
+  const queryIndex = text.indexOf('?')
+  const hashIndex = text.indexOf('#')
+  const endIndex = queryIndex >= 0 && hashIndex >= 0
+    ? Math.min(queryIndex, hashIndex)
+    : (queryIndex >= 0 ? queryIndex : hashIndex)
+  return endIndex >= 0 ? text.slice(0, endIndex) : text
 }
 const escapeForRegExp = (value) => toText(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 const normalizeExtensions = (value) => toText(value)
@@ -31,17 +47,17 @@ const normalizeExtensions = (value) => toText(value)
   .map((ext) => ext.trim().replace(/^\.+/, ''))
   .filter(Boolean)
   .map(escapeForRegExp)
-const isHttpUrl = (value) => /^https?:\/\//i.test(toText(value))
-const isProtocolRelativeUrl = (value) => /^\/\//.test(toText(value))
-const isFileUrl = (value) => /^file:\/\//i.test(toText(value))
-const hasUrlScheme = (value) => /^[a-z][a-z0-9+.-]*:\/\//i.test(toText(value))
-const hasSpecialScheme = (value) => /^(data|blob|vscode-resource|vscode-webview-resource|vscode-file):/i.test(toText(value))
+const isHttpUrl = (value) => httpUrlReg.test(toText(value))
+const isProtocolRelativeUrl = (value) => protocolRelativeReg.test(toText(value))
+const isFileUrl = (value) => fileUrlReg.test(toText(value))
+const hasUrlScheme = (value) => urlSchemeReg.test(toText(value))
+const hasSpecialScheme = (value) => specialSchemeReg.test(toText(value))
 const isAbsolutePath = (value) => {
   const text = toText(value)
   if (!text) return false
   if (text.startsWith('//')) return true
   if (text.startsWith('/')) return true
-  return /^[A-Za-z]:\//.test(text)
+  return windowsAbsolutePathReg.test(text)
 }
 const toFileUrl = (value) => {
   const text = toText(value)
@@ -67,18 +83,18 @@ const toFileUrl = (value) => {
 const isAbsoluteUrl = (value) => {
   const text = toText(value)
   if (!text) return false
-  return /^(?:[a-z][a-z0-9+.-]*:)?\/\//i.test(text)
+  return absoluteUrlReg.test(text)
 }
 const isHtmlFile = (value) => {
   const text = toText(value)
   if (!text) return false
-  return /\.(html|htm|xhtml)$/i.test(text)
+  return htmlFileReg.test(text)
 }
 
 const normalizeRelativePath = (path) => {
   const text = toText(path)
   if (!text) return text
-  const urlSchemeMatch = text.match(/^([a-z]+:\/\/)(.*)/)
+  const urlSchemeMatch = text.match(urlPathReg)
   if (urlSchemeMatch) {
     const scheme = urlSchemeMatch[1]
     const pathPart = urlSchemeMatch[2]

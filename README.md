@@ -1,373 +1,247 @@
 # p7d-markdown-it-renderer-image
 
-A markdown-it plugin plus a browser DOM helper to set `img` attributes (width/height, loading, decoding) and optionally resolve `src` using frontmatter.
+A markdown-it image plugin plus a browser DOM helper.
 
-## Quick start
+- Node plugin: rewrites image `src`, sets `width`/`height`, and can add `loading`/`decoding`.
+- DOM helper: applies the same logic to preview HTML and supports live observation.
 
-### Node usage (markdown-it)
+## Install
+
+```bash
+npm i @peaceroad/markdown-it-renderer-image
+```
+
+## Quick Start
+
+### Node (markdown-it)
 
 ```js
 import fs from 'fs'
 import mdit from 'markdown-it'
 import mditRendererImage from '@peaceroad/markdown-it-renderer-image'
 
-const mdFile = '/tmp/markdown.md'
+const mdFile = '/tmp/doc.md'
+const mdText = fs.readFileSync(mdFile, 'utf-8')
+
 const md = mdit().use(mditRendererImage, { mdPath: mdFile })
-const mdCont = fs.readFileSync(mdFile, 'utf-8')
-
-console.log(md.render(mdCont))
+console.log(md.render(mdText))
 ```
 
-`mdPath` accepts either a markdown file path or a directory path. If a directory is provided, it is used as-is for local image resolution.
+`mdPath` accepts a markdown file path or a directory path.
 
-You can also pass `mdPath` via the render env:
+You can also pass `mdPath` at render time:
 
 ```js
-const md = mdit().use(mditRendererImage)
-console.log(md.render(mdCont, { mdPath: mdFile }))
+md.render(mdText, { mdPath: mdFile })
 ```
 
-Frontmatter-based rewriting on Node:
-
-```js
-const frontmatter = { url: 'https://example.com/page' }
-const html = md.render(mdCont, { mdPath: mdFile, frontmatter })
-console.log(html)
-```
-
-### Browser / DOM usage
+### Browser / Preview DOM
 
 ```html
 <script type="module">
-import { runInPreview, applyImageTransformsToString } from '<package>/script/set-img-attributes.js'
+import { runInPreview, applyImageTransformsToString } from '@peaceroad/markdown-it-renderer-image/script/set-img-attributes.js'
 
 const { observer } = await runInPreview({
   root: document,
   markdownCont,
-  readMeta: true, // read frontmatter from <meta>
-  observe: true,  // start MutationObserver
+  readMeta: true,
+  observe: true,
 })
 
-// Process an HTML string (e.g. source view)
 const transformed = await applyImageTransformsToString(htmlSource, { readMeta: true }, markdownCont)
 
-// Stop observing when needed
 observer?.disconnect()
 </script>
 ```
 
-Notes:
-- The DOM helper provides named functions; the default export is a no-op compatibility shim.
-- `runInPreview({ root, markdownCont, observe, ...options })` is a high-level helper for preview flows (create context + apply + optional observer).
-- The default-export no-op returns a resolved Promise for safer `.catch(...)` chaining in accidental async usage.
-- The no-op warning is shown once in non-production. Set `suppressNoopWarning: true` to silence it.
-- In browser builds, importing the package root resolves to the DOM helper (named exports + no-op default). Use the script path if you want to be explicit.
-- Default option objects are exported (`defaultSharedOptions`, `defaultDomOptions`, `defaultNodeOptions`) to keep CLI and DOM configs in sync.
-- `createContext` reads YAML frontmatter from the first argument (markdown text). Pass `null`/`''` to skip YAML parsing and rely on `readMeta` (JSON in `meta[name="markdown-frontmatter"]`).
-- The DOM script imports `./img-util.js` as a module; bundle it or ensure the base URL resolves correctly.
-- For source views or HTML previews, prefer `applyImageTransformsToString()` before mounting into the live DOM.
+## Runtime Notes
 
-Example (bundler or app code that rerenders HTML):
+- In browser builds, package-root import resolves to the DOM helper (named exports + no-op default export).
+- The default export in the DOM helper is intentionally a no-op and returns a resolved Promise.
+- `createContext()` reads YAML frontmatter from `markdownCont` (first argument).
+- With `readMeta: true`, DOM helper additionally reads `meta[name="markdown-frontmatter"]` (JSON).
+
+## Common Presets
+
+### 1) VS Code live preview (low load)
 
 ```js
-import { runInPreview } from '@peaceroad/markdown-it-renderer-image/script/set-img-attributes.js'
-import { defaultDomOptions } from '@peaceroad/markdown-it-renderer-image'
-
-txt.addEventListener('input', async () => {
-  const markdownCont = txt.value
-  html.innerHTML = renderedHtml
-
-  await runInPreview({
-    root: html,
-    markdownCont,
-    ...defaultDomOptions,
-    readMeta: true,
-  })
+await runInPreview({
+  root: document,
+  markdownCont,
+  readMeta: true,
+  observe: true,
+  previewMode: 'output',
+  enableSizeProbe: false,
+  observeDebounceMs: 200,
 })
 ```
 
-### Node vs DOM parity
+### 2) Output parity between Node and DOM
 
-To make Node and DOM results match (final `src` + `width/height`):
-
-- DOM: `previewMode: 'output'` and `setDomSrc: true`
+- DOM: `previewMode: 'output'`, `setDomSrc: true`
 - Node: `resolveSrc: true`
 
-Intentional differences:
-
-- DOM: `previewMode` can separate display `src` from final output URL (Node has no equivalent).
-- DOM: `setDomSrc: false` can skip DOM `src` rewriting while still sizing (Node has no equivalent).
-- Node: `mdPath`, `disableRemoteSize`, `remoteTimeout` control local/remote sizing (DOM has no equivalent).
-
-## Options (summary)
-
-### Node plugin options (defaults)
-
-- `scaleSuffix` (false): scale by `@2x`, `300dpi`, `300ppi` suffixes.
-- `resize` (false): resize by title hint.
-- `autoHideResizeTitle` (true): remove title when resize hint is used.
-- `resizeDataAttr` (`data-img-resize`): store resize hint when title is removed (set `''` to disable).
-- `lazyLoad` (false): add `loading="lazy"`.
-- `asyncDecode` (false): add `decoding="async"`.
-- `checkImgExtensions` (`png,jpg,jpeg,gif,webp`): extensions to size.
-- `resolveSrc` (true): resolve final `src` using frontmatter (no-op without frontmatter or `urlImageBase`).
-- `mdPath` (empty): markdown file path **or** markdown directory for local sizing. When the path exists, Node uses `fs.statSync` to decide file vs directory. When the path does not exist, the heuristic is: trailing slash -> directory, otherwise treat paths with an extension as files and everything else as a directory. If you pass an extension-less file path that doesn't exist yet, it will be treated as a directory.
-- `disableRemoteSize` (false): skip remote sizing.
-- `remoteTimeout` (5000): sync fetch timeout in ms.
-- `remoteMaxBytes` (16MB): skip large remote images when content-length is present.
-- `cacheMax` (64): per-render cache size (0 disables cache).
-- `suppressErrors` (`none`): `none` | `all` | `local` | `remote`.
-- `urlImageBase` (empty): fallback base when frontmatter lacks `urlimagebase`.
-- `outputUrlMode` (`absolute`): `absolute` | `protocol-relative` | `path-only`.
-
-### DOM script options (defaults)
-
-Same as Node options except remote sizing options, plus:
-
-Scale/resize/title-handling and lazy/decoding options behave the same as the Node plugin: they affect width/height calculation and set `loading`/`decoding` attributes on the DOM.
-
-- `readMeta` (false): read `meta[name="markdown-frontmatter"]` (JSON).
-- `previewMode` (`output`): `output` | `markdown` | `local`.
-  - `output`: display final URL (default).
-  - `markdown`: display the original markdown `src` (best for drag & drop/blob mapping).
-  - `local`: display a local file URL when `lmd` is an absolute path.
-- `previewOutputSrcAttr` (`data-img-output-src`): attribute name to store the final URL when `previewMode !== output` (set `''` to disable).
-- `loadSrcStrategy` (`output`): pick the source for size probing. `output` | `raw` | `display`.
-- `loadSrcStrategy: 'final'` is accepted for backward compatibility and treated as `output`.
-- `loadSrcPrefixMap` (null): object map to rewrite `loadSrc` by prefix before probing (e.g., `{ "/img": "http://localhost:3000/img" }`).
-- `loadSrcResolver` (null): function to override the measurement source (`loadSrc`) for size calculation (DOM only).
-- `loadSrcMap` (null): map of `src` -> `loadSrc` overrides for size calculation (DOM only).
-- `setDomSrc` (true): when false, leaves `img.src` untouched (size probing still runs).
-- `enableSizeProbe` (true): when false, skips size probing entirely (no network or image load).
-- `awaitSizeProbes` (true): wait for image load before resolving `applyImageTransforms`.
-- `sizeProbeTimeoutMs` (3000): timeout for size probes (0 disables).
-- `onImageProcessed` (null): per-image callback `(imgEl, info) => {}`.
-- `suppressNoopWarning` (false): silence the browser default-export warning.
-
-`readMeta` is opt-in to avoid extra DOM work in normal pages; enable it for live preview scenarios (e.g., VS Code). When running a page from `file://`, the DOM script defaults `suppressErrors` to `local` and disables `enableSizeProbe` unless you explicitly override them, to reduce noisy console errors from local image probes.
-`suppressErrors` only silences renderer-image logs; browser network errors (CORS/404) can still appear in the console.
-
-Editing/draft mode tip: to avoid noisy requests while users type, set `setDomSrc: false`, `enableSizeProbe: false`, and `previewMode: 'markdown'`, then re-run transforms when the input stabilizes.
-
-## Options (details)
-
-### Resolve output image `src` from frontmatter or options
-
-When `resolveSrc: true` (default), image `src` is resolved using frontmatter keys.
-
-Frontmatter is used only when `resolveSrc: true`. If frontmatter (and `urlImageBase`) is missing, `src` is left untouched.
-
-Frontmatter keys (lowercase only):
-
-- `url`: page base URL.
-- `urlimage`: image base URL (absolute) or image directory (relative/empty).
-- `urlimagebase`: base URL used with the path from `url`.
-- `lid`: local image directory prefix to strip from relative `src` so the remaining subpath can be reused in the final URL.
-- `lmd`: local media directory for DOM size loading. If it is an absolute path without a scheme, it is converted to a `file:///` URL with encoded segments; relative paths are kept as-is.
-- `imagescale`: scale factor applied to all images (e.g. `60%` or `0.6`, values above 100% are capped).
-
-Base selection order:
-
-1) `urlimage` when it is absolute (has a domain or starts with `//`).
-2) `urlimagebase` (frontmatter) or `urlImageBase` (option) + path from `url`.
-3) `url`.
-
-If `urlimage` is relative (no domain), it becomes an image directory inserted between base and filename, and only the basename from `src` is used. Use `urlimage:` (empty) or `urlimage: .` to force basename-only without adding a directory.
-
-Examples:
-
-```yaml
----
-url: https://example.com/page
-urlimage: images
----
-![A cat.](cat.jpg)
-# -> https://example.com/page/images/cat.jpg (relative urlimage uses basename-only)
-```
-
-```yaml
----
-urlimage: https://image.example.com/assets/
----
-![A cat.](cat.jpg)
-# -> https://image.example.com/assets/cat.jpg
-```
-
-```yaml
----
-url: https://example.com/page
-urlimagebase: https://image.example.com/assets/
-urlimage: images
----
-![A cat.](cat.jpg)
-# -> https://image.example.com/assets/page/images/cat.jpg
-```
-
-`lid` removes only the matching prefix and keeps the remaining subpath:
-
-```yaml
----
-lid: image
----
-![](image/cat.jpg)         # -> cat.jpg
-![](image/chapter/cat.jpg) # -> chapter/cat.jpg
-```
-
-Example of a global scale factor:
-
-```yaml
----
-imagescale: 60%
----
-![](cat.jpg) # -> width/height scaled to 60%
-```
-
-`imagescale` is applied after `scaleSuffix` and only when no title resize hint is present (resize takes priority). Values above 100% are capped. Order:
-
-1) Read original size
-2) Apply `scaleSuffix` (e.g. `@2x`)
-3) Apply title resize (`resize: true`) if present
-4) Apply `imagescale` (global scale) only when step 3 is not used
-
-Example: 400x300 image with `@2x`, title `resize:50%`, and `imagescale: 0.5`
--> 400x300 -> 200x150 -> 100x75 (imagescale skipped)
-
-### Local sizing in DOM (`lmd`)
-
-In browsers, local file access is restricted. For local sizing in the DOM script, provide `lmd` (local markdown directory) as a path or a Webview URI:
-
-```yaml
----
-lmd: C:\Users\User\Documents\manuscript
----
-```
-
-In VS Code, pass a Webview URI (e.g., `asWebviewUri`) instead of a raw `file://` path.
-
-### Preview modes in DOM
-
-When `previewMode` is `markdown` or `local`, the DOM script stores the final URL in `previewOutputSrcAttr` (default `data-img-output-src`) so you can copy/export HTML with the CDN URL. The original markdown `src` is cached in `data-img-src-raw` to keep reprocessing stable; `lmd` is still used for size measurement when available. In VS Code Webview, relative `src` may not resolve, so use `previewMode: 'output'` there.
-
-If you need to measure sizes from Blob URLs (e.g., drag-and-drop files), pass `loadSrcResolver` or `loadSrcMap` so the DOM script uses those URLs only for measurement without changing the displayed `src`. Functions cannot be provided via `readMeta` JSON, so use direct options for `loadSrcResolver`. For JSON-only settings, use `loadSrcStrategy` (e.g. `raw`) and `loadSrcPrefixMap` to rewrite probing URLs without custom code.
-
-Load source selection order for probing:
-
-1) Base source is picked by `loadSrcStrategy` (`output`, `raw`, or `display`).
-2) `loadSrcPrefixMap` (if set) rewrites the probe URL by prefix.
-3) `loadSrcResolver` (if provided) or `loadSrcMap` overrides everything.
-
-`raw` uses the original markdown `src` and does **not** pass through `lmd` or `urlImageBase`. If `raw` is a relative path, size probes will likely fail unless you also provide `lmd`, `loadSrcPrefixMap`, or a resolver/map to convert it into a loadable URL.
-
-JSON-only example (VS Code settings):
-
-```json
-{
-  "rendererImage.loadSrcStrategy": "raw",
-  "rendererImage.loadSrcPrefixMap": {
-    "/img/": "http://localhost:3000/img/"
-  }
-}
-```
-
-Only `.html`, `.htm`, `.xhtml` are treated as file names when deriving the path from `url` (used by `urlimagebase`).
-
-- `url: https://example.com/page` -> `/page/`
-- `url: https://example.com/page/index.html` -> `/page/`
-- `url: https://example.com/v1.2/` -> `/v1.2/`
-
-### `outputUrlMode`
-
-Applied at the end:
-
-- `protocol-relative`: `https://a/b` -> `//a/b`
-- `path-only`: `https://a/b` -> `/b` (same-origin only)
-
-### Modify output width/height attributes from filename suffixes
-
-When `scaleSuffix: true`, scales dimensions by:
-
-- `@2x` (half size)
-- `_300dpi` / `_300ppi` (convert to 96dpi)
-
-This is identified by `imageFileName.match(/[@._-]([0-9]+)(x|dpi|ppi)$/)`
-
-Example:
+### 3) Keep markdown `src` for display, probe from mapped URL
 
 ```js
-const md = mdit().use(mditRendererImage, { scaleSuffix: true })
-md.render('![A cat](cat@2x.jpg)', { mdPath: mdFile })
-// <img ... width="200" height="150"> //cat.jpg is 400px wide and 300px high.
+await runInPreview({
+  root: document,
+  markdownCont,
+  previewMode: 'markdown',
+  loadSrcStrategy: 'raw',
+  loadSrcPrefixMap: { '/img/': 'http://localhost:3000/img/' },
+})
 ```
 
-### Modify output width/height attributes from title resize hints
+## Options
 
-When `resize: true`, resizes dimensions by title patterns. Example:
+### Shared (Node + DOM)
 
-```js
-const md = mdit().use(mditRendererImage, { resize: true })
+- `scaleSuffix` (default: `false`): Scale by filename suffix (`@2x`, `300dpi`, `300ppi`).
+- `resize` (default: `false`): Resize by title hint (for example `resize:50%`, `resize:200px`).
+- `autoHideResizeTitle` (default: `true`): Remove title when it is a resize hint.
+- `resizeDataAttr` (default: `'data-img-resize'`): Store normalized resize hint when title is removed (`''` disables).
+- `lazyLoad` (default: `false`): Add `loading="lazy"`.
+- `asyncDecode` (default: `false`): Add `decoding="async"`.
+- `checkImgExtensions` (default: `'png,jpg,jpeg,gif,webp'`): Extensions eligible for sizing (query/hash ignored).
+- `resolveSrc` (default: `true`): Resolve output `src` using frontmatter / `urlImageBase`.
+- `urlImageBase` (default: `''`): Fallback when frontmatter has no `urlimagebase`.
+- `outputUrlMode` (default: `'absolute'`): `absolute` | `protocol-relative` | `path-only`.
+- `suppressErrors` (default: `'none'`): `none` | `all` | `local` | `remote`.
 
-md.render('![A cat](cat.jpg "Resize:50%")', { mdPath: mdPat })
-// <img ... width="200" height="150"> //cat.jpg is 400px wide and 300px high.
-```
+Notes:
+- Final size is always capped to original dimensions (no upscaling behavior).
+- `outputUrlMode: 'path-only'` assumes same-origin URL usage.
 
-Title patterns include:
+### Node-only
 
-- `Resize:50%`
-- `リサイズ：50%`
-- `サイズ変更：50%`
+- `mdPath` (default: `''`): Markdown file path or directory for local image sizing.
+- `disableRemoteSize` (default: `false`): Skip remote image sizing.
+- `remoteTimeout` (default: `5000`): `sync-fetch` timeout (ms).
+- `remoteMaxBytes` (default: `16MB`): Skip remote image when `content-length` exceeds this value.
+- `cacheMax` (default: `64`): Per-render size cache entries (`0` disables).
 
-This is identified by `imgTitle.match(/(?:(?:(?:大きさ|サイズ)の?変更|リサイズ|resize(?:d to)?) *[:：]? *([0-9]+)([%％]|px)|([0-9]+)([%％]|px)[にへ](?:(?:大きさ|サイズ)を?変更|リサイズ))/i)`
+### DOM-only
 
-For `px` values, the number is treated as the target width and height is scaled to preserve aspect ratio (e.g. 400x300 with `resize:200px` -> 200x150). The final size is capped at the original image dimensions (no upscaling).
+- `readMeta` (default: `false`): Read `meta[name="markdown-frontmatter"]` JSON.
+- `previewMode` (default: `'output'`): `output` | `markdown` | `local`.
+- `previewOutputSrcAttr` (default: `'data-img-output-src'`): Stores final output URL when preview mode is not `output` (`''` disables).
+- `observeAttributeFilter` (default: `['src','title','alt']`): Image attributes watched by MutationObserver.
+- `observeDebounceMs` (default: `0`): Quiet-period debounce before re-processing.
+- `setDomSrc` (default: `true`): Write display URL to `img.src`.
+- `loadSrcStrategy` (default: `'output'`): Probe source: `output` | `raw` | `display`.
+- `loadSrcPrefixMap` (default: `null`): Prefix remap for probe URL.
+- `loadSrcResolver` (default: `null`): Function override for probe URL.
+- `loadSrcMap` (default: `null`): Static map override for probe URL.
+- `enableSizeProbe` (default: `true`): Enable browser image probing for dimensions.
+- `awaitSizeProbes` (default: `true`): Await all probe promises before returning summary.
+- `sizeProbeTimeoutMs` (default: `3000`): Probe timeout (`0` disables timeout).
+- `probeCacheMaxEntries` (default: `0`): Cross-run probe cache size (`0` disables).
+- `probeCacheTtlMs` (default: `0`): Success cache TTL (ms).
+- `probeNegativeCacheTtlMs` (default: `0`): Failure/timeout cache TTL (ms).
+- `onImageProcessed` (default: `null`): Hook: `(imgEl, info) => {}`.
+- `suppressNoopWarning` (default: `false`): Silence browser default-export warning.
 
-When `autoHideResizeTitle: true` (default), titles with resize hints are removed (Node/DOM). Set `autoHideResizeTitle: false` to keep titles even when resize hints are used. Resize hints are preserved in `resizeDataAttr` by default (`data-img-resize`) using normalized values like `50%` or `200px`; set `resizeDataAttr: ''` to disable.
+Additional DOM behavior:
+- On `file://` pages, if not explicitly overridden:
+  - `suppressErrors` is auto-set to `local`
+  - `enableSizeProbe` is auto-set to `false`
+- `loadSrcStrategy: 'final'` is accepted as a backward-compatible alias of `'output'`.
 
-Default behavior example (when `resize: true`):
+## Frontmatter Resolution Workflow
 
-```js
-const md = mdit().use(mditRendererImage, { resize: true })
+When `resolveSrc: true`, frontmatter keys are used (`url`, `urlimage`, `urlimagebase`, `lid`, `lmd`, `imagescale`).
 
-md.render('![Figure](cat.jpg "resize:50%")', { mdPath: mdPat })
-// <img ... width="200" height="150" data-img-resize="50%">
-```
+Base URL selection order:
 
-If you render HTML with the Node plugin and then run the DOM script, keep `resizeDataAttr: 'data-img-resize'` (default) so the resize hint survives title removal. If you do not need DOM reprocessing, set `resizeDataAttr: ''` to avoid extra attributes.
+1. Absolute `urlimage`
+2. `urlimagebase` + path extracted from `url`
+3. `url`
 
-### Set `loading` and `decoding` attributes
+Rules:
+- Relative `urlimage` is treated as an image directory; basename-only from original `src` is used.
+- `lid` strips a local prefix from relative `src`.
+- Query/hash are preserved.
 
-- `lazyLoad: true` -> `loading="lazy"`
-- `asyncDecode: true` -> `decoding="async"`
+Only `.html`, `.htm`, `.xhtml` are treated as file names when deriving URL path from `url`.
 
-### Check image extensions
+## Size Calculation Workflow
 
-Only files matching `checkImgExtensions` are sized. Query/hash is ignored.
+Order:
 
-## Remote images (Node)
+1. Read intrinsic dimensions
+2. Apply `scaleSuffix` (if enabled)
+3. Apply title resize (`resize`) if present
+4. Apply `imagescale` only when step 3 is not used
+5. Cap to original size (no upscaling)
 
-Remote sizing is synchronous. For extension hosts (e.g., VS Code), set `disableRemoteSize: true` and let the DOM script size remote images.
+## DOM Probe Source Workflow
+
+Probe URL (`loadSrc`) is decided in this order:
+
+1. Base from `loadSrcStrategy` (`output`/`raw`/`display`)
+2. Apply `loadSrcPrefixMap` (if set)
+3. Override by `loadSrcResolver` (if provided) or `loadSrcMap`
+
+Probe cache behavior:
+- `probeCacheMaxEntries > 0` enables cache.
+- Success results use `probeCacheTtlMs`.
+- Failure/timeout results use `probeNegativeCacheTtlMs`.
+- In-flight probe requests for same key are deduplicated.
+
+## Observer Workflow (DOM)
+
+`startObserver()`:
+- Watches DOM mutations and re-applies transforms.
+- Uses `observeAttributeFilter` as event gate.
+- Adds `content` to observer attributeFilter when `readMeta: true`.
+- Supports rAF batching and optional quiet-period debounce (`observeDebounceMs`).
+- On meta changes, context is rebuilt and observer filter is refreshed.
+
+## API Summary (DOM Helper)
+
+- `createContext(markdownCont, options, root)`
+- `applyImageTransforms(root, contextOrOptions, markdownCont?)`
+- `applyImageTransformsToString(html, contextOrOptions, markdownCont?)`
+- `startObserver(root, contextOrOptions, markdownCont?)`
+- `runInPreview({ root, markdownCont, observe, context, ...options })`
+
+## Remote Images on Node
+
+Node remote sizing uses synchronous fetch (`sync-fetch`).
+
+Recommendations for extension hosts (for example VS Code):
+- Prefer `disableRemoteSize: true`.
+- Let DOM helper handle preview sizing.
+
+Important limit:
+- `remoteMaxBytes` is effective only when `content-length` is present.
 
 ## Testing
 
-- `npm test` (Node plugin + frontmatter tests)
-- `npm run test:script` (DOM script tests)
+- `npm test` (Node plugin + YAML/frontmatter tests)
+- `npm run test:script` (DOM helper tests)
 
-## VS Code / Webview notes
+## VS Code / Webview Notes
 
-- Webview blocks `file://`. Pass `lmd` as a Webview URI (`asWebviewUri`) if you need local sizing in the DOM.
-- The DOM script imports `./img-util.js` as a module; bundle it or ensure the base URL resolves correctly.
+- Webview blocks raw `file://` access.
+- For local probing in Webview, provide `lmd` as a webview URI (for example via `asWebviewUri`).
+- If `previewMode: 'markdown'` is used in Webview, relative paths may not resolve; prefer `previewMode: 'output'` there.
 
-## Note: Using with @peaceroad/markdown-it-figure-with-p-caption
+## With `@peaceroad/markdown-it-figure-with-p-caption`
 
-`markdown-it-figure-with-p-caption` can auto-generate captions from title text when its detection rules match. To avoid conflicts, use **title for one purpose only**:
+Do not overload title with both caption text and resize hints.
 
-- **Title as resize hint** (recommended): keep captions in a paragraph or alt text, and avoid caption-like strings in title. This lets `autoHideResizeTitle` work as intended.
-- **Title as caption**: do not put resize hints in title, or set `autoHideResizeTitle: false` so the title remains for caption detection.
+- If title is used for resize hints: keep caption in paragraph/alt.
+- If title is used for caption: disable auto title hiding (`autoHideResizeTitle: false`) or avoid resize hints in title.
 
-In short: don’t mix resize hints and caption text in the same title.
+## Performance Checklist
 
-## Performance tips
-
-- Node: remote sizing is synchronous; set `disableRemoteSize: true` for extension hosts and rely on DOM sizing.
-- Node: keep `cacheMax` > 0 to avoid repeated I/O on the same image set.
-- DOM: for fast previews, set `enableSizeProbe: false` or `awaitSizeProbes: false`.
-- DOM: if you only need metadata, set `setDomSrc: false` to avoid triggering image loads.
+- Node:
+  - Disable remote sizing in extension hosts: `disableRemoteSize: true`
+  - Keep `cacheMax > 0` for repeated images in same render
+- DOM:
+  - For editing-heavy preview: `enableSizeProbe: false`
+  - If probing is needed: tune `observeDebounceMs` and probe cache TTLs
+  - If only metadata transform is needed: `setDomSrc: false`

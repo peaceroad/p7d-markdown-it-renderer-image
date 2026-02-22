@@ -26,6 +26,7 @@ const loadDomModule = () => import(scriptUrl)
 class MockElement {
   constructor(tagName, attributes = {}) {
     this.tagName = tagName
+    this.nodeType = 1
     this.attributes = new Map()
     this.complete = true
     this.naturalWidth = 800
@@ -154,6 +155,7 @@ const runTest = async (testNumber, testName, testFn) => {
   }
   console.log() // Add empty line after each test
 }
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
 // Test 1: Basic image attribute setting
 console.log('===========================================================')
@@ -1179,6 +1181,710 @@ await runTest(49, 'Single IMG root is processed', async () => {
     assert.strictEqual(img.getAttribute('height'), '600')
   } finally {
     global.Image = originalImage
+  }
+})
+
+// Test 50: observeAttributeFilter can skip selected img attributes
+await runTest(50, 'observeAttributeFilter limits observed attributes', async () => {
+  const images = [
+    new MockElement('img', { src: 'cat.jpg', alt: 'cat', title: 'cat title' })
+  ]
+  const root = createMockDocument(images)
+  const originalMutationObserver = global.MutationObserver
+  const originalRequestAnimationFrame = global.requestAnimationFrame
+  let processedCount = 0
+  let lastObserver = null
+
+  global.requestAnimationFrame = (fn) => setTimeout(fn, 0)
+  global.MutationObserver = class MockMutationObserver {
+    constructor(callback) {
+      this.callback = callback
+      this.target = null
+      this.options = null
+      lastObserver = this
+    }
+    observe(target, options) {
+      this.target = target
+      this.options = options
+    }
+    disconnect() {}
+  }
+
+  try {
+    const mod = await loadDomModule()
+    const controller = await mod.startObserver(root, {
+      observeAttributeFilter: ['src', 'alt'],
+      enableSizeProbe: false,
+      onImageProcessed: () => { processedCount += 1 },
+    })
+
+    assert.ok(lastObserver)
+    assert.deepStrictEqual(lastObserver.options.attributeFilter, ['src', 'alt'])
+
+    lastObserver.callback([{
+      type: 'attributes',
+      target: images[0],
+      attributeName: 'title',
+    }])
+    await sleep(30)
+    assert.strictEqual(processedCount, 0)
+
+    lastObserver.callback([{
+      type: 'attributes',
+      target: images[0],
+      attributeName: 'src',
+    }])
+    await sleep(30)
+    assert.strictEqual(processedCount, 1)
+
+    controller.disconnect()
+  } finally {
+    if (originalRequestAnimationFrame === undefined) {
+      delete global.requestAnimationFrame
+    } else {
+      global.requestAnimationFrame = originalRequestAnimationFrame
+    }
+    if (originalMutationObserver === undefined) {
+      delete global.MutationObserver
+    } else {
+      global.MutationObserver = originalMutationObserver
+    }
+  }
+})
+
+// Test 51: readMeta observation keeps meta content in attributeFilter
+await runTest(51, 'readMeta keeps content in attributeFilter', async () => {
+  const images = [
+    new MockElement('img', { src: 'cat.jpg', alt: 'cat' })
+  ]
+  const metaTag = new MockElement('meta', { name: 'markdown-frontmatter', content: '{}' })
+  const root = createMockDocument(images, metaTag)
+  const originalMutationObserver = global.MutationObserver
+  let lastObserver = null
+
+  global.MutationObserver = class MockMutationObserver {
+    constructor(callback) {
+      this.callback = callback
+      this.target = null
+      this.options = null
+      lastObserver = this
+    }
+    observe(target, options) {
+      this.target = target
+      this.options = options
+    }
+    disconnect() {}
+  }
+
+  try {
+    const mod = await loadDomModule()
+    const controller = await mod.startObserver(root, {
+      readMeta: true,
+      observeAttributeFilter: ['src'],
+    })
+    assert.ok(lastObserver)
+    assert.ok(lastObserver.options.attributeFilter.includes('src'))
+    assert.ok(lastObserver.options.attributeFilter.includes('content'))
+    controller.disconnect()
+  } finally {
+    if (originalMutationObserver === undefined) {
+      delete global.MutationObserver
+    } else {
+      global.MutationObserver = originalMutationObserver
+    }
+  }
+})
+
+// Test 52: observeDebounceMs coalesces bursts into one apply run
+await runTest(52, 'observeDebounceMs adds quiet-period debounce', async () => {
+  const images = [
+    new MockElement('img', { src: 'cat.jpg', alt: 'cat' })
+  ]
+  const root = createMockDocument(images)
+  const originalMutationObserver = global.MutationObserver
+  const originalRequestAnimationFrame = global.requestAnimationFrame
+  let lastObserver = null
+  let processedCount = 0
+
+  global.requestAnimationFrame = (fn) => setTimeout(fn, 0)
+  global.MutationObserver = class MockMutationObserver {
+    constructor(callback) {
+      this.callback = callback
+      this.target = null
+      this.options = null
+      lastObserver = this
+    }
+    observe(target, options) {
+      this.target = target
+      this.options = options
+    }
+    disconnect() {}
+  }
+
+  try {
+    const mod = await loadDomModule()
+    const controller = await mod.startObserver(root, {
+      observeAttributeFilter: ['src'],
+      observeDebounceMs: 40,
+      enableSizeProbe: false,
+      onImageProcessed: () => { processedCount += 1 },
+    })
+
+    lastObserver.callback([{ type: 'attributes', target: images[0], attributeName: 'src' }])
+    await sleep(10)
+    lastObserver.callback([{ type: 'attributes', target: images[0], attributeName: 'src' }])
+    await sleep(10)
+    lastObserver.callback([{ type: 'attributes', target: images[0], attributeName: 'src' }])
+
+    await sleep(20)
+    assert.strictEqual(processedCount, 0)
+    await sleep(80)
+    assert.strictEqual(processedCount, 1)
+
+    controller.disconnect()
+  } finally {
+    if (originalRequestAnimationFrame === undefined) {
+      delete global.requestAnimationFrame
+    } else {
+      global.requestAnimationFrame = originalRequestAnimationFrame
+    }
+    if (originalMutationObserver === undefined) {
+      delete global.MutationObserver
+    } else {
+      global.MutationObserver = originalMutationObserver
+    }
+  }
+})
+
+// Test 53: probe cache reuses successful measurements across apply runs
+await runTest(53, 'probe cache reuses successful probes', async () => {
+  const images = [
+    new MockElement('img', { src: 'cat.jpg', alt: 'cat' })
+  ]
+  const root = createMockDocument(images)
+  const originalImage = global.Image
+  let loadCount = 0
+
+  global.Image = class CacheableImage extends MockElement {
+    constructor() {
+      super('img')
+      this.complete = false
+      this.naturalWidth = 800
+      this.naturalHeight = 600
+      this.onload = null
+      this.onerror = null
+    }
+    setAttribute(name, value) {
+      super.setAttribute(name, value)
+      if (name === 'src') {
+        loadCount += 1
+        this.complete = true
+        if (this.onload) setTimeout(() => this.onload(), 0)
+      }
+    }
+  }
+
+  try {
+    const mod = await loadDomModule()
+    const context = await mod.createContext('', {
+      probeCacheMaxEntries: 8,
+      probeCacheTtlMs: 3000,
+      probeNegativeCacheTtlMs: 500,
+    }, root)
+    const summary1 = await mod.applyImageTransforms(root, context)
+    const summary2 = await mod.applyImageTransforms(root, context)
+
+    assert.strictEqual(summary1.sized, 1)
+    assert.strictEqual(summary2.sized, 1)
+    assert.strictEqual(loadCount, 1)
+  } finally {
+    global.Image = originalImage
+  }
+})
+
+// Test 54: probe negative cache suppresses repeated failed probes
+await runTest(54, 'probe cache reuses failed probe results', async () => {
+  const images = [
+    new MockElement('img', { src: 'broken.jpg', alt: 'broken' })
+  ]
+  const root = createMockDocument(images)
+  const originalImage = global.Image
+  let loadCount = 0
+
+  global.Image = class FailingImage extends MockElement {
+    constructor() {
+      super('img')
+      this.complete = false
+      this.onload = null
+      this.onerror = null
+    }
+    setAttribute(name, value) {
+      super.setAttribute(name, value)
+      if (name === 'src') {
+        loadCount += 1
+        if (this.onerror) setTimeout(() => this.onerror(), 0)
+      }
+    }
+  }
+
+  try {
+    const mod = await loadDomModule()
+    const context = await mod.createContext('', {
+      suppressErrors: 'all',
+      probeCacheMaxEntries: 8,
+      probeCacheTtlMs: 3000,
+      probeNegativeCacheTtlMs: 3000,
+    }, root)
+    const summary1 = await mod.applyImageTransforms(root, context)
+    const summary2 = await mod.applyImageTransforms(root, context)
+
+    assert.strictEqual(summary1.failed, 1)
+    assert.strictEqual(summary2.failed, 1)
+    assert.strictEqual(loadCount, 1)
+  } finally {
+    global.Image = originalImage
+  }
+})
+
+// Test 55: probe cache TTL expiry re-probes after expiration
+await runTest(55, 'probe cache TTL expiry triggers re-probe', async () => {
+  const images = [
+    new MockElement('img', { src: 'cat.jpg', alt: 'cat' })
+  ]
+  const root = createMockDocument(images)
+  const originalImage = global.Image
+  let loadCount = 0
+
+  global.Image = class CacheableImage extends MockElement {
+    constructor() {
+      super('img')
+      this.complete = false
+      this.naturalWidth = 800
+      this.naturalHeight = 600
+      this.onload = null
+      this.onerror = null
+    }
+    setAttribute(name, value) {
+      super.setAttribute(name, value)
+      if (name === 'src') {
+        loadCount += 1
+        this.complete = true
+        if (this.onload) setTimeout(() => this.onload(), 0)
+      }
+    }
+  }
+
+  try {
+    const mod = await loadDomModule()
+    const context = await mod.createContext('', {
+      probeCacheMaxEntries: 8,
+      probeCacheTtlMs: 20,
+      probeNegativeCacheTtlMs: 20,
+    }, root)
+    await mod.applyImageTransforms(root, context)
+    await sleep(60)
+    await mod.applyImageTransforms(root, context)
+
+    assert.strictEqual(loadCount, 2)
+  } finally {
+    global.Image = originalImage
+  }
+})
+
+// Test 56: readMeta option change refreshes observer attributeFilter
+await runTest(56, 'readMeta refreshes observer attributeFilter', async () => {
+  const images = [
+    new MockElement('img', { src: 'cat.jpg', alt: 'cat', title: 'cat title' })
+  ]
+  const metaTag = new MockElement('meta', {
+    name: 'markdown-frontmatter',
+    content: JSON.stringify({
+      _extensionSettings: {
+        rendererImage: {
+          observeAttributeFilter: ['src']
+        }
+      }
+    })
+  })
+  const root = createMockDocument(images, metaTag)
+  const originalMutationObserver = global.MutationObserver
+  const originalRequestAnimationFrame = global.requestAnimationFrame
+  let processedCount = 0
+  let lastObserver = null
+
+  global.requestAnimationFrame = (fn) => setTimeout(fn, 0)
+  global.MutationObserver = class MockMutationObserver {
+    constructor(callback) {
+      this.callback = callback
+      this.target = null
+      this.options = null
+      lastObserver = this
+    }
+    observe(target, options) {
+      this.target = target
+      this.options = options
+    }
+    disconnect() {}
+  }
+
+  try {
+    const mod = await loadDomModule()
+    const controller = await mod.startObserver(root, {
+      readMeta: true,
+      enableSizeProbe: false,
+      onImageProcessed: () => { processedCount += 1 },
+    })
+
+    assert.ok(lastObserver.options.attributeFilter.includes('src'))
+    assert.ok(lastObserver.options.attributeFilter.includes('content'))
+    assert.ok(!lastObserver.options.attributeFilter.includes('title'))
+
+    metaTag.setAttribute('content', JSON.stringify({
+      _extensionSettings: {
+        rendererImage: {
+          observeAttributeFilter: ['title']
+        }
+      }
+    }))
+    lastObserver.callback([{
+      type: 'attributes',
+      target: metaTag,
+      attributeName: 'content',
+    }])
+    await sleep(40)
+    const processedAfterMeta = processedCount
+
+    assert.ok(lastObserver.options.attributeFilter.includes('title'))
+    assert.ok(lastObserver.options.attributeFilter.includes('content'))
+    assert.ok(!lastObserver.options.attributeFilter.includes('src'))
+
+    lastObserver.callback([{
+      type: 'attributes',
+      target: images[0],
+      attributeName: 'title',
+    }])
+    await sleep(30)
+    assert.strictEqual(processedCount, processedAfterMeta + 1)
+
+    controller.disconnect()
+  } finally {
+    if (originalRequestAnimationFrame === undefined) {
+      delete global.requestAnimationFrame
+    } else {
+      global.requestAnimationFrame = originalRequestAnimationFrame
+    }
+    if (originalMutationObserver === undefined) {
+      delete global.MutationObserver
+    } else {
+      global.MutationObserver = originalMutationObserver
+    }
+  }
+})
+
+// Test 57: iterable roots (e.g., Set<img>) are supported
+await runTest(57, 'Iterable IMG roots are processed', async () => {
+  const images = [
+    new MockElement('img', { src: 'cat.jpg', alt: 'cat' }),
+    new MockElement('img', { src: 'dog.png', alt: 'dog' })
+  ]
+  const rootIterable = new Set(images)
+
+  const mod = await loadDomModule()
+  const context = await mod.createContext('', { enableSizeProbe: false }, null)
+  const summary = await mod.applyImageTransforms(rootIterable, context)
+
+  assert.strictEqual(summary.total, 2)
+  assert.strictEqual(summary.processed, 2)
+  assert.strictEqual(summary.skipped, 2)
+})
+
+// Test 58: one-shot iterable roots are not consumed during context setup
+await runTest(58, 'One-shot iterable roots are processed', async () => {
+  const image = new MockElement('img', { src: 'cat.jpg', alt: 'cat' })
+  function* createRoot() {
+    yield image
+  }
+  const root = createRoot()
+
+  const mod = await loadDomModule()
+  const summary = await mod.applyImageTransforms(root, {
+    enableSizeProbe: false,
+    probeCacheMaxEntries: 8,
+    probeCacheTtlMs: 3000,
+    probeNegativeCacheTtlMs: 3000,
+  })
+
+  assert.strictEqual(summary.total, 1)
+  assert.strictEqual(summary.processed, 1)
+  assert.strictEqual(summary.skipped, 1)
+})
+
+// Test 59: mixed-case IMG tag names are accepted
+await runTest(59, 'Mixed-case IMG root is processed', async () => {
+  const image = new MockElement('Img', { src: 'cat.jpg', alt: 'cat' })
+
+  const mod = await loadDomModule()
+  const summary = await mod.applyImageTransforms(image, {
+    enableSizeProbe: false,
+  })
+
+  assert.strictEqual(summary.total, 1)
+  assert.strictEqual(summary.processed, 1)
+  assert.strictEqual(summary.skipped, 1)
+})
+
+// Test 60: observer processing recovers after an internal error
+await runTest(60, 'Observer recovers after processing errors', async () => {
+  const image = new MockElement('img', { src: 'cat.jpg', alt: 'cat' })
+  const root = createMockDocument([image])
+  const originalMutationObserver = global.MutationObserver
+  const originalRequestAnimationFrame = global.requestAnimationFrame
+  let processedCount = 0
+  let lastObserver = null
+  let throwOnce = true
+  const originalSetAttribute = image.setAttribute.bind(image)
+  image.setAttribute = (name, value) => {
+    if (name === 'loading' && throwOnce) {
+      throwOnce = false
+      throw new Error('forced observer processing failure')
+    }
+    originalSetAttribute(name, value)
+  }
+
+  global.requestAnimationFrame = (fn) => setTimeout(fn, 0)
+  global.MutationObserver = class MockMutationObserver {
+    constructor(callback) {
+      this.callback = callback
+      this.target = null
+      this.options = null
+      lastObserver = this
+    }
+    observe(target, options) {
+      this.target = target
+      this.options = options
+    }
+    disconnect() {}
+  }
+
+  try {
+    const mod = await loadDomModule()
+    const controller = await mod.startObserver(root, {
+      observeAttributeFilter: ['src'],
+      enableSizeProbe: false,
+      lazyLoad: true,
+      suppressErrors: 'all',
+      onImageProcessed: () => { processedCount += 1 },
+    })
+
+    lastObserver.callback([{
+      type: 'attributes',
+      target: image,
+      attributeName: 'src',
+    }])
+    await sleep(40)
+    assert.strictEqual(processedCount, 0)
+
+    lastObserver.callback([{
+      type: 'attributes',
+      target: image,
+      attributeName: 'src',
+    }])
+    await sleep(40)
+    assert.strictEqual(processedCount, 1)
+
+    controller.disconnect()
+  } finally {
+    if (originalRequestAnimationFrame === undefined) {
+      delete global.requestAnimationFrame
+    } else {
+      global.requestAnimationFrame = originalRequestAnimationFrame
+    }
+    if (originalMutationObserver === undefined) {
+      delete global.MutationObserver
+    } else {
+      global.MutationObserver = originalMutationObserver
+    }
+  }
+})
+
+// Test 61: mixed-case META tag names are detected for readMeta observation
+await runTest(61, 'Mixed-case META updates refresh observer filters', async () => {
+  const images = [
+    new MockElement('img', { src: 'cat.jpg', alt: 'cat', title: 'cat title' })
+  ]
+  const metaTag = new MockElement('MeTa', {
+    name: 'markdown-frontmatter',
+    content: JSON.stringify({
+      _extensionSettings: {
+        rendererImage: {
+          observeAttributeFilter: ['src']
+        }
+      }
+    }),
+  })
+  const root = createMockDocument(images, metaTag)
+  const originalMutationObserver = global.MutationObserver
+  const originalRequestAnimationFrame = global.requestAnimationFrame
+  let processedCount = 0
+  let lastObserver = null
+
+  global.requestAnimationFrame = (fn) => setTimeout(fn, 0)
+  global.MutationObserver = class MockMutationObserver {
+    constructor(callback) {
+      this.callback = callback
+      this.target = null
+      this.options = null
+      lastObserver = this
+    }
+    observe(target, options) {
+      this.target = target
+      this.options = options
+    }
+    disconnect() {}
+  }
+
+  try {
+    const mod = await loadDomModule()
+    const controller = await mod.startObserver(root, {
+      readMeta: true,
+      enableSizeProbe: false,
+      onImageProcessed: () => { processedCount += 1 },
+    })
+
+    assert.ok(lastObserver.options.attributeFilter.includes('src'))
+    assert.ok(lastObserver.options.attributeFilter.includes('content'))
+    assert.ok(!lastObserver.options.attributeFilter.includes('title'))
+
+    metaTag.setAttribute('content', JSON.stringify({
+      _extensionSettings: {
+        rendererImage: {
+          observeAttributeFilter: ['title']
+        }
+      }
+    }))
+    lastObserver.callback([{
+      type: 'attributes',
+      target: metaTag,
+      attributeName: 'content',
+    }])
+    await sleep(40)
+    const processedAfterMeta = processedCount
+
+    assert.ok(lastObserver.options.attributeFilter.includes('title'))
+    assert.ok(lastObserver.options.attributeFilter.includes('content'))
+    assert.ok(!lastObserver.options.attributeFilter.includes('src'))
+
+    lastObserver.callback([{
+      type: 'attributes',
+      target: images[0],
+      attributeName: 'title',
+    }])
+    await sleep(30)
+    assert.strictEqual(processedCount, processedAfterMeta + 1)
+
+    controller.disconnect()
+  } finally {
+    if (originalRequestAnimationFrame === undefined) {
+      delete global.requestAnimationFrame
+    } else {
+      global.requestAnimationFrame = originalRequestAnimationFrame
+    }
+    if (originalMutationObserver === undefined) {
+      delete global.MutationObserver
+    } else {
+      global.MutationObserver = originalMutationObserver
+    }
+  }
+})
+
+// Test 62: startObserver with provided context keeps readMeta behavior after refresh
+await runTest(62, 'startObserver(context) preserves readMeta on re-create', async () => {
+  const images = [
+    new MockElement('img', { src: 'cat.jpg', alt: 'cat', title: 'cat title' })
+  ]
+  const metaTag = new MockElement('meta', {
+    name: 'markdown-frontmatter',
+    content: JSON.stringify({
+      _extensionSettings: {
+        rendererImage: {
+          observeAttributeFilter: ['src']
+        }
+      }
+    }),
+  })
+  const root = createMockDocument(images, metaTag)
+  const originalMutationObserver = global.MutationObserver
+  const originalRequestAnimationFrame = global.requestAnimationFrame
+  let processedCount = 0
+  let lastObserver = null
+
+  global.requestAnimationFrame = (fn) => setTimeout(fn, 0)
+  global.MutationObserver = class MockMutationObserver {
+    constructor(callback) {
+      this.callback = callback
+      this.target = null
+      this.options = null
+      lastObserver = this
+    }
+    observe(target, options) {
+      this.target = target
+      this.options = options
+    }
+    disconnect() {}
+  }
+
+  try {
+    const mod = await loadDomModule()
+    const context = await mod.createContext('', {
+      readMeta: true,
+      enableSizeProbe: false,
+      onImageProcessed: () => { processedCount += 1 },
+    }, root)
+    const controller = await mod.startObserver(root, context)
+
+    assert.ok(lastObserver.options.attributeFilter.includes('src'))
+    assert.ok(lastObserver.options.attributeFilter.includes('content'))
+    assert.ok(!lastObserver.options.attributeFilter.includes('title'))
+
+    metaTag.setAttribute('content', JSON.stringify({
+      _extensionSettings: {
+        rendererImage: {
+          observeAttributeFilter: ['title']
+        }
+      }
+    }))
+    lastObserver.callback([{
+      type: 'attributes',
+      target: metaTag,
+      attributeName: 'content',
+    }])
+    await sleep(40)
+    const processedAfterMeta = processedCount
+
+    assert.ok(lastObserver.options.attributeFilter.includes('title'))
+    assert.ok(lastObserver.options.attributeFilter.includes('content'))
+    assert.ok(!lastObserver.options.attributeFilter.includes('src'))
+
+    lastObserver.callback([{
+      type: 'attributes',
+      target: images[0],
+      attributeName: 'title',
+    }])
+    await sleep(30)
+    assert.strictEqual(processedCount, processedAfterMeta + 1)
+
+    controller.disconnect()
+  } finally {
+    if (originalRequestAnimationFrame === undefined) {
+      delete global.requestAnimationFrame
+    } else {
+      global.requestAnimationFrame = originalRequestAnimationFrame
+    }
+    if (originalMutationObserver === undefined) {
+      delete global.MutationObserver
+    } else {
+      global.MutationObserver = originalMutationObserver
+    }
   }
 })
 

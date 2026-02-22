@@ -25,8 +25,28 @@ export { defaultSharedOptions, defaultDomOptions, defaultNodeOptions }
 
 const globalFailedImgLoads = new Set()
 const globalMissingMdPathWarnings = new Set()
+const emptyImgData = Object.freeze({})
+const globalLogSetMaxEntries = 2048
 
 const toAbsoluteRemote = (value) => (isProtocolRelativeUrl(value) ? `https:${value}` : value)
+const addToBoundedSet = (set, key, maxEntries = globalLogSetMaxEntries) => {
+  if (!set || set.has(key)) return
+  set.add(key)
+  if (maxEntries > 0 && set.size > maxEntries) {
+    const oldest = set.values().next().value
+    if (typeof oldest !== 'undefined') set.delete(oldest)
+  }
+}
+const shouldLogLoadError = (cacheKey, failedSet, suppressLoadErrors, suppressByType) => (
+  !suppressLoadErrors
+  && !suppressByType
+  && !failedSet.has(cacheKey)
+  && !globalFailedImgLoads.has(cacheKey)
+)
+const markLoadErrorLogged = (cacheKey, failedSet) => {
+  failedSet.add(cacheKey)
+  addToBoundedSet(globalFailedImgLoads, cacheKey)
+}
 const setCache = (cache, key, value, maxEntries) => {
   if (maxEntries === 0) return
   cache.set(key, value)
@@ -34,6 +54,13 @@ const setCache = (cache, key, value, maxEntries) => {
     const firstKey = cache.keys().next().value
     cache.delete(firstKey)
   }
+}
+const hasOwnEnumerableKeys = (value) => {
+  if (!value || typeof value !== 'object') return false
+  for (const key in value) {
+    if (Object.prototype.hasOwnProperty.call(value, key)) return true
+  }
+  return false
 }
 
 const resolveMdDir = (value) => {
@@ -69,7 +96,9 @@ const getLocalImgSrc = (imgSrc, mdDir) => {
     }
   }
   if (mdDir === '') return ''
-  const cleanSrc = stripQueryHash(imgSrc)
+  const cleanSrc = imgSrc.includes('?') || imgSrc.includes('#')
+    ? stripQueryHash(imgSrc)
+    : imgSrc
   const decodedSrc = safeDecodeUri(cleanSrc)
   const finalSrc = decodedSrc === cleanSrc ? cleanSrc : decodedSrc
   return path.resolve(mdDir, finalSrc.replace(/[/\\]/g, path.sep))
@@ -77,20 +106,33 @@ const getLocalImgSrc = (imgSrc, mdDir) => {
 
 const getImgData = (src, isRemote, timeout, cache, cacheMax, failedSet, suppressLoadErrors, suppressLocalErrors, suppressRemoteErrors, remoteMaxBytes) => {
   const cacheKey = `${isRemote ? 'remote' : 'local'}:${src}`
-  if (cacheMax !== 0 && cache.has(cacheKey)) return cache.get(cacheKey) || {}
+  if (cacheMax !== 0) {
+    const cached = cache.get(cacheKey)
+    if (cached !== undefined) return cached
+  }
   try {
     let data
     if (isRemote) {
       const response = fetch(src, timeout ? { timeout } : undefined)
+      const responseStatus = typeof response?.status === 'number' ? response.status : 200
+      if (responseStatus < 200 || responseStatus >= 300) {
+        const suppressByType = suppressRemoteErrors
+        if (shouldLogLoadError(cacheKey, failedSet, suppressLoadErrors, suppressByType)) {
+          console.error(`[renderer-image] Can't load image (HTTP ${responseStatus}): ${src}`)
+          markLoadErrorLogged(cacheKey, failedSet)
+        }
+        setCache(cache, cacheKey, emptyImgData, cacheMax)
+        return emptyImgData
+      }
       const contentLength = Number(response.headers.get('content-length'))
       if (Number.isFinite(contentLength) && remoteMaxBytes && contentLength > remoteMaxBytes) {
         const suppressByType = suppressRemoteErrors
-        if (!suppressLoadErrors && !suppressByType && !failedSet.has(cacheKey)) {
+        if (shouldLogLoadError(cacheKey, failedSet, suppressLoadErrors, suppressByType)) {
           console.error(`[renderer-image] Skip image (too large: ${contentLength} bytes): ${src}`)
-          failedSet.add(cacheKey)
+          markLoadErrorLogged(cacheKey, failedSet)
         }
-        setCache(cache, cacheKey, null, cacheMax)
-        return {}
+        setCache(cache, cacheKey, emptyImgData, cacheMax)
+        return emptyImgData
       }
       data = imageSize(response.buffer())
     } else {
@@ -100,13 +142,12 @@ const getImgData = (src, isRemote, timeout, cache, cacheMax, failedSet, suppress
     return data
   } catch {
     const suppressByType = isRemote ? suppressRemoteErrors : suppressLocalErrors
-    if (!suppressLoadErrors && !suppressByType && !failedSet.has(cacheKey) && !globalFailedImgLoads.has(cacheKey)) {
+    if (shouldLogLoadError(cacheKey, failedSet, suppressLoadErrors, suppressByType)) {
       console.error("[renderer-image] Can't load image: " + src)
-      failedSet.add(cacheKey)
-      globalFailedImgLoads.add(cacheKey)
+      markLoadErrorLogged(cacheKey, failedSet)
     }
-    setCache(cache, cacheKey, null, cacheMax)
-    return {}
+    setCache(cache, cacheKey, emptyImgData, cacheMax)
+    return emptyImgData
   }
 }
 
@@ -131,34 +172,29 @@ const mditRendererImage = (md, option) => {
   const remoteSizeEnabled = !opt.disableRemoteSize
   const hasOptMdPath = !!opt.mdPath
   const resolvedOptMdDir = hasOptMdPath ? resolveMdDir(opt.mdPath) : ''
-  const suppressLoadErrors = opt.suppressErrors === 'all'
-  const suppressLocalErrors = opt.suppressErrors === 'local' || opt.suppressErrors === 'all'
-  const suppressRemoteErrors = opt.suppressErrors === 'remote' || opt.suppressErrors === 'all'
+  const suppressErrorMode = opt.suppressErrors
+  const suppressLoadErrors = suppressErrorMode === 'all'
+  const suppressLocalErrors = suppressErrorMode === 'local' || suppressLoadErrors
+  const suppressRemoteErrors = suppressErrorMode === 'remote' || suppressLoadErrors
+  const resolveSrcEnabled = opt.resolveSrc
+  const outputUrlMode = opt.outputUrlMode
+  const hasOptUrlImageBase = !!opt.urlImageBase
+  const resizeEnabled = opt.resize
+  const autoHideResizeTitle = opt.autoHideResizeTitle
+  const asyncDecodeEnabled = opt.asyncDecode
+  const lazyLoadEnabled = opt.lazyLoad
+  const cacheMax = opt.cacheMax
+  const remoteTimeout = opt.remoteTimeout
+  const remoteMaxBytes = opt.remoteMaxBytes
+  const scaleSuffixEnabled = opt.scaleSuffix
+  const noUpscale = opt.noUpscale
   const resizeDataAttr = typeof opt.resizeDataAttr === 'string' && opt.resizeDataAttr.trim()
     ? opt.resizeDataAttr
     : ''
 
-  const stateCache = new WeakMap()
   const removeTokenAttr = (token, name) => {
     const index = token.attrIndex(name)
     if (index >= 0) token.attrs.splice(index, 1)
-  }
-
-  const ensureState = (state) => {
-    let cached = stateCache.get(state)
-    if (!cached) {
-      cached = {
-        imgDataCache: new Map(),
-        failedImgLoads: new Set(),
-        missingMdPathWarnings: new Set(),
-        frontmatterSource: null,
-        resolvedFrontmatter: null,
-        imageBase: '',
-        imageScale: null,
-      }
-      stateCache.set(state, cached)
-    }
-    return cached
   }
 
   const processImageToken = (token, state, fmContext) => {
@@ -169,17 +205,21 @@ const mditRendererImage = (md, option) => {
     const srcSuffix = srcRaw.slice(srcBase.length)
     let src = srcBase
     const titleRaw = token.attrGet('title')
+    const warningKey = srcBase || srcRaw
 
-    const parsedFrontmatter = fmContext?.parsedFrontmatter || {}
-    const imageScale = fmContext?.imageScale || null
-    const shouldParseFrontmatter = fmContext?.shouldParseFrontmatter || false
-    const mdDir = fmContext?.mdDir || ''
+    const {
+      parsedFrontmatter,
+      imageScale,
+      shouldParseFrontmatter,
+      mdDir,
+      imageBase,
+    } = fmContext
 
-    if (opt.resolveSrc && src && shouldParseFrontmatter) {
+    if (resolveSrcEnabled && src && shouldParseFrontmatter) {
       const { lid, imageDir, hasImageDir } = parsedFrontmatter
-      const imageBase = fmContext?.imageBase || ''
+      const isLocalSrc = !isHttpUrl(src) && !isProtocolRelativeUrl(src) && !isFileUrl(src) && !hasSpecialScheme(src)
 
-      if (!isHttpUrl(src) && !isProtocolRelativeUrl(src) && !isFileUrl(src) && !hasSpecialScheme(src)) {
+      if (isLocalSrc) {
         if (lid) {
           if (src.startsWith(lid)) {
             src = src.substring(lid.length)
@@ -200,42 +240,49 @@ const mditRendererImage = (md, option) => {
     }
 
     const resolvedSrc = src + srcSuffix
-    let finalSrc = safeDecodeUri(resolvedSrc)
-    finalSrc = applyOutputUrlMode(finalSrc, opt.outputUrlMode)
+    const finalSrc = applyOutputUrlMode(safeDecodeUri(resolvedSrc), outputUrlMode)
 
-    const isValidExt = imgExtReg.test(srcRaw)
-    const isRemote = isHttpUrl(srcRaw) || isProtocolRelativeUrl(srcRaw)
-    const isFile = isFileUrl(srcRaw)
+    const isValidExt = imgExtReg.test(srcBase)
+    const isRemote = isHttpUrl(srcBase) || isProtocolRelativeUrl(srcBase)
+    const isFile = isFileUrl(srcBase)
 
     if (isValidExt) {
-      const srcPath = isRemote ? toAbsoluteRemote(srcRaw) : getLocalImgSrc(srcBase, mdDir)
-      const canReadRemote = isRemote && remoteSizeEnabled
-      const hasSrcPath = (isRemote && canReadRemote) || (!isRemote && srcPath)
+      let srcPath = ''
+      let hasSrcPath = false
+      if (isRemote) {
+        if (remoteSizeEnabled) {
+          srcPath = toAbsoluteRemote(srcRaw)
+          hasSrcPath = !!srcPath
+        }
+      } else {
+        srcPath = getLocalImgSrc(srcBase, mdDir)
+        hasSrcPath = !!srcPath
+      }
 
-      if (!srcPath && !isRemote && !isFile && !missingMdPathWarnings.has(srcRaw) && !globalMissingMdPathWarnings.has(srcRaw)) {
+      if (!srcPath && !isRemote && !isFile && !missingMdPathWarnings.has(warningKey) && !globalMissingMdPathWarnings.has(warningKey)) {
         console.warn(`[renderer-image] Set mdPath in options or env to read local image dimensions: ${srcRaw}`)
-        missingMdPathWarnings.add(srcRaw)
-        globalMissingMdPathWarnings.add(srcRaw)
+        missingMdPathWarnings.add(warningKey)
+        addToBoundedSet(globalMissingMdPathWarnings, warningKey)
       }
 
       const imgData = hasSrcPath
         ? getImgData(
           srcPath,
           isRemote,
-          opt.remoteTimeout,
+          remoteTimeout,
           imgDataCache,
-          opt.cacheMax,
+          cacheMax,
           failedImgLoads,
           suppressLoadErrors,
           suppressLocalErrors,
           suppressRemoteErrors,
-          opt.remoteMaxBytes
+          remoteMaxBytes
         )
-        : {}
+        : emptyImgData
 
       if (imgData?.width !== undefined) {
         const imgName = path.basename(srcBase, path.extname(srcBase))
-        const { width, height } = setImgSize(imgName, imgData, opt.scaleSuffix, opt.resize, titleRaw, imageScale, opt.noUpscale)
+        const { width, height } = setImgSize(imgName, imgData, scaleSuffixEnabled, resizeEnabled, titleRaw, imageScale, noUpscale)
         token.attrSet('width', width)
         token.attrSet('height', height)
       }
@@ -244,8 +291,8 @@ const mditRendererImage = (md, option) => {
     token.attrSet('src', finalSrc)
     token.attrSet('alt', token.content || '')
 
-    const resizeValue = opt.resize ? normalizeResizeValue(titleRaw) : ''
-    const removeTitle = opt.autoHideResizeTitle && !!resizeValue
+    const resizeValue = resizeEnabled ? normalizeResizeValue(titleRaw) : ''
+    const removeTitle = autoHideResizeTitle && !!resizeValue
     if (titleRaw && !removeTitle) {
       token.attrSet('title', titleRaw)
     } else if (removeTitle) {
@@ -254,33 +301,34 @@ const mditRendererImage = (md, option) => {
       }
       removeTokenAttr(token, 'title')
     }
-    if (isValidExt && opt.asyncDecode) token.attrSet('decoding', 'async')
-    if (isValidExt && opt.lazyLoad) token.attrSet('loading', 'lazy')
+    if (isValidExt && asyncDecodeEnabled) token.attrSet('decoding', 'async')
+    if (isValidExt && lazyLoadEnabled) token.attrSet('loading', 'lazy')
   }
 
   md.core.ruler.after('replacements', 'renderer_image', (state) => {
-    const cached = ensureState(state)
+    const renderState = {
+      imgDataCache: new Map(),
+      failedImgLoads: new Set(),
+      missingMdPathWarnings: new Set(),
+    }
     const env = state?.env || {}
     const mdDir = hasOptMdPath
       ? resolvedOptMdDir
       : (env?.mdPath ? resolveMdDir(env.mdPath) : '')
     const frontmatter = env?.frontmatter || md.env?.frontmatter
-    const hasFrontmatter = !!(frontmatter && typeof frontmatter === 'object' && Object.keys(frontmatter).length > 0)
-    const shouldParseFrontmatter = hasFrontmatter || !!opt.urlImageBase
-    if (shouldParseFrontmatter && cached.frontmatterSource !== frontmatter) {
-      const parsedFrontmatter = getFrontmatter(frontmatter || {}, opt) || {}
-      cached.frontmatterSource = frontmatter
-      cached.resolvedFrontmatter = parsedFrontmatter
-      cached.imageBase = resolveImageBase({
+    const hasFrontmatter = hasOwnEnumerableKeys(frontmatter)
+    const shouldParseFrontmatter = hasFrontmatter || hasOptUrlImageBase
+    const parsedFrontmatter = shouldParseFrontmatter
+      ? (getFrontmatter(frontmatter || {}, opt) || {})
+      : {}
+    const imageScale = shouldParseFrontmatter ? parsedFrontmatter.imageScale : null
+    const imageBase = shouldParseFrontmatter
+      ? resolveImageBase({
         url: parsedFrontmatter.url,
         urlimage: parsedFrontmatter.urlimage,
         urlimagebase: parsedFrontmatter.urlimagebase || opt.urlImageBase,
       })
-      cached.imageScale = parsedFrontmatter.imageScale
-    }
-    const parsedFrontmatter = shouldParseFrontmatter ? (cached.resolvedFrontmatter || {}) : {}
-    const imageScale = shouldParseFrontmatter ? cached.imageScale : null
-    const imageBase = cached.imageBase || ''
+      : ''
     const fmContext = {
       shouldParseFrontmatter,
       parsedFrontmatter,
@@ -289,11 +337,14 @@ const mditRendererImage = (md, option) => {
       mdDir,
     }
     const tokens = state.tokens || []
-    for (const token of tokens) {
+    for (let tokenIndex = 0; tokenIndex < tokens.length; tokenIndex += 1) {
+      const token = tokens[tokenIndex]
       if (token.type !== 'inline' || !token.children) continue
-      for (const child of token.children) {
+      const children = token.children
+      for (let childIndex = 0; childIndex < children.length; childIndex += 1) {
+        const child = children[childIndex]
         if (child.type === 'image') {
-          processImageToken(child, cached, fmContext)
+          processImageToken(child, renderState, fmContext)
         }
       }
     }

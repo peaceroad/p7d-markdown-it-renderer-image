@@ -17,11 +17,16 @@ const defaultDomOptions = Object.freeze({
   ...defaultSharedOptions,
   previewMode: 'output', // output | markdown | local
   previewOutputSrcAttr: 'data-img-output-src', // store final src when previewMode !== output
+  observeAttributeFilter: Object.freeze(['src', 'title', 'alt']), // observed img attributes
+  observeDebounceMs: 0, // quiet-period debounce for observer scheduling (ms)
   setDomSrc: true, // write img.src in DOM
   loadSrcStrategy: 'output', // output | raw | display
   loadSrcPrefixMap: null, // prefix map for loadSrc (e.g., { "/img": "http://..." })
   loadSrcResolver: null, // override loadSrc for size measurement
   loadSrcMap: null, // map markdown src to loadSrc for size measurement
+  probeCacheMaxEntries: 0, // cross-run size-probe cache size (0 disables)
+  probeCacheTtlMs: 0, // positive probe cache TTL in ms
+  probeNegativeCacheTtlMs: 0, // failed/timeout probe cache TTL in ms
   enableSizeProbe: true, // run image size probing
   awaitSizeProbes: true, // await image load for size calculation
   sizeProbeTimeoutMs: 3000, // timeout for size probe (0 disables)

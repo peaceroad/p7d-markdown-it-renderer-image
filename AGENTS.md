@@ -29,10 +29,15 @@
    - `loadSrcStrategy` chooses the probe source (`output` | `raw` | `display`).
    - `loadSrcPrefixMap` rewrites probe URLs by prefix (JSON-friendly).
    - `loadSrcResolver` / `loadSrcMap` can override the measurement source (`loadSrc`) for size calculation.
+   - Optional probe cache across apply runs: `probeCacheMaxEntries` (bounded cache size), `probeCacheTtlMs` (success TTL), `probeNegativeCacheTtlMs` (failed/timeout TTL). In-flight probe requests are de-duplicated by `loadSrc`.
    - Returns a summary object `{ total, processed, pending, sized, failed, timeout, skipped }` and optionally calls `onImageProcessed(img, info)` per image.
    - Uses `awaitSizeProbes` and `sizeProbeTimeoutMs` to control async sizing.
 4. `applyImageTransformsToString(html, contextOrOptions)` uses `DOMParser` to transform an HTML string and returns the updated HTML.
 5. `startObserver(root, contextOrOptions)` runs a MutationObserver and re-applies transforms; returns `{ disconnect }`.
+   - `observeAttributeFilter` customizes which image attributes are observed (default `src/title/alt`).
+   - `observeDebounceMs` adds quiet-period debounce in addition to existing rAF batching.
+   - When `readMeta` changes observer-related options, observer registration is refreshed to keep attributeFilter behavior consistent.
+   - If a prebuilt context is passed, observer re-creation uses the original option seed (`context.seedOption`) so runtime meta options are not accidentally frozen as explicit overrides.
 
 ## Utilities (script/img-util.js)
 - Frontmatter parsing, path normalization, resize/scaleSuffix regexes, image base resolution, and size adjustment (`setImgSize`).
@@ -40,6 +45,7 @@
 - URL path extraction treats only `.html`, `.htm`, `.xhtml` as file names; other dotted segments are kept as directories.
 - Shared URL helpers (scheme checks, basename, extension regex, `applyOutputUrlMode`) are centralized here and used by both Node and DOM.
 - `safeDecodeUri` avoids decoding `%2F/%5C` to keep path segmentation stable while still handling non-ASCII filenames.
+- URL/scheme helper regexes are module-level constants to avoid per-call re-allocation on hot paths.
 - Utility helpers treat non-string inputs as empty values to avoid runtime TypeErrors.
 
 ## Testing

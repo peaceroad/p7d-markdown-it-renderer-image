@@ -46,22 +46,26 @@ const removeAttrIfPresent = (element, name) => {
   if (!hasAttr(element, name)) return
   element.removeAttribute(name)
 }
+const parseJsonSafe = (value) => {
+  try {
+    return JSON.parse(value)
+  } catch {
+    return null
+  }
+}
 const originalSrcAttr = 'data-img-src-raw'
-const observedImgAttributes = new Set(['src', 'title', 'alt'])
+const defaultObservedImgAttributes = Object.freeze(['src', 'title', 'alt'])
 const allowedPreviewModes = new Set(['output', 'markdown', 'local'])
 const allowedLoadSrcStrategies = new Set(['output', 'raw', 'display'])
-const emptySummary = Object.freeze({
-  total: 0,
+const probeCacheByOwner = new WeakMap()
+const createSummary = (total = 0) => ({
+  total,
   processed: 0,
   pending: 0,
   sized: 0,
   failed: 0,
   timeout: 0,
   skipped: 0,
-})
-const createSummary = (total = 0) => ({
-  ...emptySummary,
-  total,
 })
 const safeInvokeImageProcessed = (handler, img, info, suppressErrors = false) => {
   if (!handler) return
@@ -91,21 +95,150 @@ const applyPrefixMap = (value, entries) => {
   }
   return text
 }
-const isImgTag = (node) => !!(node && typeof node.tagName === 'string' && node.tagName.toUpperCase() === 'IMG')
+const normalizeObserveAttributeFilter = (value) => {
+  if (!Array.isArray(value)) return [...defaultObservedImgAttributes]
+  const normalized = []
+  const seen = new Set()
+  for (const entry of value) {
+    if (typeof entry !== 'string') continue
+    const attr = entry.trim().toLowerCase()
+    if (!attr || seen.has(attr)) continue
+    seen.add(attr)
+    normalized.push(attr)
+  }
+  if (normalized.length === 0) return [...defaultObservedImgAttributes]
+  return normalized
+}
+const normalizeNonNegativeNumber = (value, fallback = 0) => {
+  if (!Number.isFinite(value) || value < 0) return fallback
+  return value
+}
+const normalizeNonNegativeInt = (value, fallback = 0) => {
+  if (!Number.isFinite(value) || value < 0) return fallback
+  return Math.floor(value)
+}
+const hasTagName = (node, lowerName, upperName) => {
+  const tag = node && node.tagName
+  if (tag === lowerName || tag === upperName) return true
+  if (typeof tag !== 'string' || tag.length !== lowerName.length) return false
+  return tag.toLowerCase() === lowerName
+}
+const isImgTag = (node) => {
+  return hasTagName(node, 'img', 'IMG')
+}
 const collectImages = (root) => {
   if (!root) return []
   if (Array.isArray(root)) return root.filter(isImgTag)
   if (isImgTag(root)) return [root]
+  if (typeof root.getElementsByTagName === 'function') return Array.from(root.getElementsByTagName('img'))
   if (typeof root.querySelectorAll === 'function') return Array.from(root.querySelectorAll('img'))
-  if (typeof root.length === 'number' && typeof root[Symbol.iterator] === 'function') return Array.from(root).filter(isImgTag)
+  if (typeof root !== 'string' && typeof root[Symbol.iterator] === 'function') return Array.from(root).filter(isImgTag)
   return []
 }
+const resolveOwnerFromIterable = (value) => {
+  if (!value || typeof value === 'string') return null
+  const resolveFromItem = (item) => {
+    if (!item || (typeof item !== 'object' && typeof item !== 'function')) return null
+    if (item.nodeType === 9) return item
+    if (item.ownerDocument && typeof item.ownerDocument === 'object') return item.ownerDocument
+    if (item.documentElement || item.body) return item
+    return null
+  }
+  if (Array.isArray(value) || typeof value.length === 'number') {
+    for (let index = 0; index < value.length; index += 1) {
+      const owner = resolveFromItem(value[index])
+      if (owner) return owner
+    }
+    return null
+  }
+  if (typeof value.size === 'number' && value.size > 0 && typeof value.values === 'function') {
+    const iterator = value.values()
+    if (!iterator || typeof iterator.next !== 'function') return null
+    return resolveFromItem(iterator.next().value)
+  }
+  return null
+}
+const resolveCacheOwner = (root) => {
+  if (!root || (typeof root !== 'object' && typeof root !== 'function')) return null
+  const iterableOwner = resolveOwnerFromIterable(root)
+  if (iterableOwner) return iterableOwner
+  if (root.nodeType === 9) return root
+  if (root.ownerDocument && typeof root.ownerDocument === 'object') return root.ownerDocument
+  if (root.documentElement || root.body) return root
+  return root
+}
+const createProbeCacheState = () => ({
+  entries: new Map(),
+  inFlight: new Map(),
+})
+const getProbeCacheState = (context, root, images = null) => {
+  if (!context || !context.opt || context.opt.probeCacheMaxEntries <= 0) return null
+  let owner = context.probeCacheOwner
+  if (!owner) {
+    owner = resolveOwnerFromIterable(images)
+    if (!owner) owner = resolveCacheOwner(root)
+    if (owner) context.probeCacheOwner = owner
+  }
+  if (owner && (typeof owner === 'object' || typeof owner === 'function')) {
+    let state = probeCacheByOwner.get(owner)
+    if (!state) {
+      state = createProbeCacheState()
+      probeCacheByOwner.set(owner, state)
+    }
+    return state
+  }
+  if (!context.probeCacheState) context.probeCacheState = createProbeCacheState()
+  return context.probeCacheState
+}
+const getCachedProbeResult = (state, key, now) => {
+  if (!state || !key) return null
+  const cached = state.entries.get(key)
+  if (!cached) return null
+  if (!Number.isFinite(cached.expiresAt) || cached.expiresAt <= now) {
+    state.entries.delete(key)
+    return null
+  }
+  state.entries.delete(key)
+  state.entries.set(key, cached)
+  return cached.result
+}
+const setCachedProbeResult = (state, key, result, ttlMs, maxEntries, now) => {
+  if (!state || !key || maxEntries <= 0 || ttlMs <= 0) return
+  state.entries.delete(key)
+  state.entries.set(key, {
+    expiresAt: now + ttlMs,
+    result,
+  })
+  while (state.entries.size > maxEntries) {
+    const oldestKey = state.entries.keys().next().value
+    if (typeof oldestKey === 'undefined') break
+    state.entries.delete(oldestKey)
+  }
+}
+const sharedContextUtils = Object.freeze({
+  setImgSize,
+  normalizeRelativePath,
+  normalizeResizeValue,
+  resizeValueReg,
+  normalizeExtensions,
+  isHttpUrl,
+  isProtocolRelativeUrl,
+  isFileUrl,
+  hasUrlScheme,
+  hasSpecialScheme,
+  stripQueryHash,
+  getBasename,
+  getImageName,
+  applyOutputUrlMode,
+})
 
 export const createContext = async (markdownCont = '', option = {}, root = null) => {
   const opt = { ...defaultDomOptions }
   const safeOption = option && typeof option === 'object' ? { ...option } : null
+  const seedOption = safeOption ? { ...safeOption } : {}
   if (safeOption && Object.prototype.hasOwnProperty.call(safeOption, 'noUpscale')) {
     delete safeOption.noUpscale
+    delete seedOption.noUpscale
   }
   if (safeOption) Object.assign(opt, safeOption)
   const optionOverrides = new Set(safeOption ? Object.keys(safeOption) : [])
@@ -120,16 +253,9 @@ export const createContext = async (markdownCont = '', option = {}, root = null)
     if (!metaTag) return null
     const content = metaTag.getAttribute('content')
     if (!content) return null
-    const parseJson = (value) => {
-      try {
-        return JSON.parse(value)
-      } catch {
-        return null
-      }
-    }
-    let parsed = parseJson(content)
+    let parsed = parseJsonSafe(content)
     if (!parsed && content.includes('&quot;')) {
-      parsed = parseJson(content.replace(/&quot;/g, '"'))
+      parsed = parseJsonSafe(content.replace(/&quot;/g, '"'))
     }
     return parsed && typeof parsed === 'object' ? parsed : null
   }
@@ -156,6 +282,10 @@ export const createContext = async (markdownCont = '', option = {}, root = null)
       if (optionOverrides.has(key)) return
       if (value && typeof value === 'object' && !Array.isArray(value)) targetOpt[key] = value
     }
+    const setArray = (key, value) => {
+      if (optionOverrides.has(key)) return
+      if (Array.isArray(value)) targetOpt[key] = value
+    }
 
     setBool('scaleSuffix', rendererSettings.scaleSuffix)
     setBool('resize', rendererSettings.resize)
@@ -178,7 +308,12 @@ export const createContext = async (markdownCont = '', option = {}, root = null)
     setFunc('onImageProcessed', rendererSettings.onImageProcessed)
     setObject('loadSrcMap', rendererSettings.loadSrcMap)
     setObject('loadSrcPrefixMap', rendererSettings.loadSrcPrefixMap)
+    setArray('observeAttributeFilter', rendererSettings.observeAttributeFilter)
     setNumber('sizeProbeTimeoutMs', rendererSettings.sizeProbeTimeoutMs)
+    setNumber('observeDebounceMs', rendererSettings.observeDebounceMs)
+    setNumber('probeCacheMaxEntries', rendererSettings.probeCacheMaxEntries)
+    setNumber('probeCacheTtlMs', rendererSettings.probeCacheTtlMs)
+    setNumber('probeNegativeCacheTtlMs', rendererSettings.probeNegativeCacheTtlMs)
 
     if (!optionOverrides.has('autoHideResizeTitle') && typeof rendererSettings.autoHideResizeTitle === 'boolean') {
       targetOpt.autoHideResizeTitle = rendererSettings.autoHideResizeTitle
@@ -238,6 +373,11 @@ export const createContext = async (markdownCont = '', option = {}, root = null)
   if (!Number.isFinite(currentOpt.sizeProbeTimeoutMs) || currentOpt.sizeProbeTimeoutMs < 0) {
     currentOpt.sizeProbeTimeoutMs = 0
   }
+  currentOpt.observeDebounceMs = normalizeNonNegativeNumber(currentOpt.observeDebounceMs, 0)
+  currentOpt.probeCacheMaxEntries = normalizeNonNegativeInt(currentOpt.probeCacheMaxEntries, 0)
+  currentOpt.probeCacheTtlMs = normalizeNonNegativeNumber(currentOpt.probeCacheTtlMs, 0)
+  currentOpt.probeNegativeCacheTtlMs = normalizeNonNegativeNumber(currentOpt.probeNegativeCacheTtlMs, 0)
+  currentOpt.observeAttributeFilter = normalizeObserveAttributeFilter(currentOpt.observeAttributeFilter)
   if (typeof currentOpt.enableSizeProbe !== 'boolean') {
     currentOpt.enableSizeProbe = true
   }
@@ -281,6 +421,9 @@ export const createContext = async (markdownCont = '', option = {}, root = null)
 
   return {
     opt: currentOpt,
+    seedOption,
+    observedImgAttributes: new Set(currentOpt.observeAttributeFilter),
+    probeCacheOwner: resolveCacheOwner(root),
     imageBase,
     lidPattern,
     adjustedLmd,
@@ -294,22 +437,7 @@ export const createContext = async (markdownCont = '', option = {}, root = null)
     hasImageDir,
     imageScale,
     onImageProcessed,
-    utils: {
-      setImgSize,
-      normalizeRelativePath,
-      normalizeResizeValue,
-      resizeValueReg,
-      normalizeExtensions,
-      isHttpUrl,
-      isProtocolRelativeUrl,
-      isFileUrl,
-      hasUrlScheme,
-      hasSpecialScheme,
-      stripQueryHash,
-      getBasename,
-      getImageName,
-      applyOutputUrlMode,
-    },
+    utils: sharedContextUtils,
   }
 }
 
@@ -354,38 +482,83 @@ export const applyImageTransforms = async (root, contextOrOptions = {}, markdown
 
   const images = collectImages(root)
   const summary = createSummary(images.length)
+  if (images.length === 0) return summary
+  const probeCacheState = getProbeCacheState(context, root, images)
+  const probeCacheMaxEntries = currentOpt.probeCacheMaxEntries
+  const probeCacheTtlMs = currentOpt.probeCacheTtlMs
+  const probeNegativeCacheTtlMs = currentOpt.probeNegativeCacheTtlMs
+  const suppressErrorMode = currentOpt.suppressErrors
+  const suppressAllErrors = suppressErrorMode === 'all'
+  const resolveSrcEnabled = currentOpt.resolveSrc
+  const outputUrlMode = currentOpt.outputUrlMode
+  const previewMode = currentOpt.previewMode
+  const loadSrcStrategy = currentOpt.loadSrcStrategy
+  const hasLoadSrcPrefixMap = loadSrcPrefixEntries.length > 0
+  const setDomSrc = currentOpt.setDomSrc
+  const resizeEnabled = currentOpt.resize
+  const scaleSuffixEnabled = currentOpt.scaleSuffix
+  const noUpscaleEnabled = currentOpt.noUpscale
+  const autoHideResizeTitle = currentOpt.autoHideResizeTitle
+  const asyncDecodeEnabled = currentOpt.asyncDecode
+  const lazyLoadEnabled = currentOpt.lazyLoad
+  const enableSizeProbe = currentOpt.enableSizeProbe
+  const hasImageProcessedHook = !!onImageProcessed
 
-  const probeImage = (img, payload) => {
-    const {
+  const emitImageProcessed = (img, status, width, height, loadSrc, finalSrc, displaySrc) => {
+    if (!hasImageProcessedHook) return
+    safeInvokeImageProcessed(onImageProcessed, img, {
+      status,
+      width,
+      height,
       loadSrc,
-      sizeSrc,
-      resizeTitleForSize,
-    } = payload
-    const imgName = getImageName(sizeSrc)
-    const isRemoteForError = isHttpUrl(loadSrc) || isProtocolRelativeUrl(loadSrc)
-    const suppressByType = currentOpt.suppressErrors === 'all'
-      || (currentOpt.suppressErrors === 'local' && !isRemoteForError)
-      || (currentOpt.suppressErrors === 'remote' && isRemoteForError)
-    const suppressLoadErrors = suppressByType
-    const timeoutMs = currentOpt.sizeProbeTimeoutMs
+      finalSrc,
+      displaySrc,
+    }, suppressAllErrors)
+  }
+  const applyProbeResultToImage = (img, imgName, resizeTitleForSize, loadSrc, finalSrc, displaySrc, probeResult) => {
+    let status = probeResult?.status || 'failed'
+    let width = 0
+    let height = 0
 
+    if (status === 'sized') {
+      const naturalWidth = probeResult?.naturalWidth || 0
+      const naturalHeight = probeResult?.naturalHeight || 0
+      if (!naturalWidth || !naturalHeight) {
+        status = 'failed'
+      } else {
+        const sized = setImgSize(
+          imgName,
+          { width: naturalWidth, height: naturalHeight },
+          scaleSuffixEnabled,
+          resizeEnabled,
+          resizeTitleForSize,
+          imageScale,
+          noUpscaleEnabled
+        )
+        width = sized.width
+        height = sized.height
+        setAttrIfChanged(img, 'width', width)
+        setAttrIfChanged(img, 'height', height)
+      }
+    }
+
+    emitImageProcessed(img, status, width, height, loadSrc, finalSrc, displaySrc)
+    return status
+  }
+  const loadImageProbeResult = (loadSrc, suppressLoadErrors) => {
+    const timeoutMs = currentOpt.sizeProbeTimeoutMs
     return new Promise((resolve) => {
       let settled = false
       let timeoutId = null
-      const done = (status, width = 0, height = 0) => {
+      const done = (status, naturalWidth = 0, naturalHeight = 0) => {
         if (settled) return
         settled = true
         if (timeoutId) clearTimeout(timeoutId)
-        const info = {
+        resolve({
           status,
-          width,
-          height,
-          loadSrc,
-          finalSrc: payload.finalSrc,
-          displaySrc: payload.displaySrc,
-        }
-        safeInvokeImageProcessed(onImageProcessed, img, info, currentOpt.suppressErrors === 'all')
-        resolve(info)
+          naturalWidth,
+          naturalHeight,
+        })
       }
 
       const originalImage = new Image()
@@ -395,18 +568,7 @@ export const applyImageTransforms = async (root, contextOrOptions = {}, markdown
           done('failed')
           return
         }
-        const { width, height } = setImgSize(
-          imgName,
-          { width: originalImage.naturalWidth, height: originalImage.naturalHeight },
-          currentOpt.scaleSuffix,
-          currentOpt.resize,
-          resizeTitleForSize,
-          imageScale,
-          currentOpt.noUpscale
-        )
-        setAttrIfChanged(img, 'width', width)
-        setAttrIfChanged(img, 'height', height)
-        done('sized', width, height)
+        done('sized', originalImage.naturalWidth, originalImage.naturalHeight)
       }
       originalImage.onerror = () => {
         if (settled) return
@@ -433,6 +595,59 @@ export const applyImageTransforms = async (root, contextOrOptions = {}, markdown
       }
     })
   }
+  const resolveProbeResult = (loadSrc, suppressLoadErrors) => {
+    if (!probeCacheState || probeCacheMaxEntries <= 0 || !loadSrc) {
+      return loadImageProbeResult(loadSrc, suppressLoadErrors)
+    }
+    const cacheKey = String(loadSrc)
+    const cacheCheckAt = Date.now()
+    const cached = getCachedProbeResult(probeCacheState, cacheKey, cacheCheckAt)
+    if (cached) return Promise.resolve(cached)
+    const inFlight = probeCacheState.inFlight.get(cacheKey)
+    if (inFlight) return inFlight
+
+    const promise = loadImageProbeResult(loadSrc, suppressLoadErrors)
+      .then((result) => {
+        const ttlMs = result.status === 'sized' ? probeCacheTtlMs : probeNegativeCacheTtlMs
+        const cacheWriteAt = Date.now()
+        setCachedProbeResult(
+          probeCacheState,
+          cacheKey,
+          result,
+          ttlMs,
+          probeCacheMaxEntries,
+          cacheWriteAt
+        )
+        return result
+      })
+      .finally(() => {
+        probeCacheState.inFlight.delete(cacheKey)
+      })
+    probeCacheState.inFlight.set(cacheKey, promise)
+    return promise
+  }
+  const probeImage = (img, loadSrc, sizeSrc, resizeTitleForSize, finalSrc, displaySrc) => {
+    const imgName = getImageName(sizeSrc)
+    const isRemoteForError = isHttpUrl(loadSrc) || isProtocolRelativeUrl(loadSrc)
+    const suppressLoadErrors = suppressAllErrors
+      || (suppressErrorMode === 'local' && !isRemoteForError)
+      || (suppressErrorMode === 'remote' && isRemoteForError)
+
+    return resolveProbeResult(loadSrc, suppressLoadErrors)
+      .then((probeResult) => applyProbeResultToImage(
+        img,
+        imgName,
+        resizeTitleForSize,
+        loadSrc,
+        finalSrc,
+        displaySrc,
+        probeResult
+      ))
+  }
+  const markSkippedImage = (img, loadSrc, finalSrc, displaySrc) => {
+    summary.skipped += 1
+    emitImageProcessed(img, 'skipped', 0, 0, loadSrc, finalSrc, displaySrc)
+  }
 
   const tasks = []
 
@@ -445,8 +660,8 @@ export const applyImageTransforms = async (root, contextOrOptions = {}, markdown
     summary.processed += 1
 
     const storedOriginalSrc = getAttr(img, originalSrcAttr)
-    const useStored = currentOpt.previewMode !== 'output' && storedOriginalSrc
-    const srcRaw = useStored ? storedOriginalSrc : (getAttr(img, 'src') || '')
+    const useStored = previewMode !== 'output' && storedOriginalSrc
+    const srcRaw = useStored ? storedOriginalSrc : getAttr(img, 'src')
     const srcBase = stripQueryHash(srcRaw)
     const srcSuffix = srcRaw.slice(srcBase.length)
     const isLocalSrc = !isHttpUrl(srcRaw)
@@ -459,7 +674,7 @@ export const applyImageTransforms = async (root, contextOrOptions = {}, markdown
     let loadSrc = srcRaw
     let localDisplaySrc = ''
 
-    if (currentOpt.resolveSrc) {
+    if (resolveSrcEnabled) {
       if (isLocalSrc) {
         if (lidPattern) src = src.replace(lidPattern, '')
 
@@ -479,31 +694,27 @@ export const applyImageTransforms = async (root, contextOrOptions = {}, markdown
         }
         src = normalizeRelativePath(nextSrc)
       }
-      finalSrc = applyOutputUrlMode(src + srcSuffix, currentOpt.outputUrlMode)
-    } else {
-      finalSrc = applyOutputUrlMode(src + srcSuffix, currentOpt.outputUrlMode)
     }
+    finalSrc = applyOutputUrlMode(src + srcSuffix, outputUrlMode)
 
-    if (!currentOpt.resolveSrc) {
-      loadSrc = finalSrc
-    } else if (!adjustedLmd || !isLocalSrc) {
+    if (!resolveSrcEnabled || !adjustedLmd || !isLocalSrc) {
       loadSrc = finalSrc
     }
 
     let displaySrc = finalSrc
-    if (currentOpt.previewMode === 'markdown' && isLocalSrc) {
+    if (previewMode === 'markdown' && isLocalSrc) {
       displaySrc = storedOriginalSrc || srcRaw
     }
-    if (currentOpt.previewMode === 'local' && isLocalSrc) {
+    if (previewMode === 'local' && isLocalSrc) {
       displaySrc = localDisplaySrc || storedOriginalSrc || srcRaw
     }
 
-    if (currentOpt.loadSrcStrategy === 'raw') {
+    if (loadSrcStrategy === 'raw') {
       loadSrc = srcRaw
-    } else if (currentOpt.loadSrcStrategy === 'display') {
+    } else if (loadSrcStrategy === 'display') {
       loadSrc = displaySrc
     }
-    if (loadSrcPrefixEntries.length) {
+    if (hasLoadSrcPrefixMap) {
       loadSrc = applyPrefixMap(loadSrc, loadSrcPrefixEntries)
     }
     if (loadSrcResolver) {
@@ -518,7 +729,7 @@ export const applyImageTransforms = async (root, contextOrOptions = {}, markdown
           loadSrc = resolved
         }
       } catch (error) {
-        if (currentOpt.suppressErrors !== 'all') {
+        if (!suppressAllErrors) {
           console.error('[renderer-image(dom)] loadSrcResolver hook failed.', error)
         }
       }
@@ -529,7 +740,7 @@ export const applyImageTransforms = async (root, contextOrOptions = {}, markdown
       }
     }
 
-    if (currentOpt.previewMode !== 'output') {
+    if (previewMode !== 'output') {
       if (!storedOriginalSrc && srcRaw) setAttrIfChanged(img, originalSrcAttr, srcRaw)
       if (outputSrcAttr && finalSrc) setAttrIfChanged(img, outputSrcAttr, finalSrc)
     } else {
@@ -537,7 +748,7 @@ export const applyImageTransforms = async (root, contextOrOptions = {}, markdown
       if (outputSrcAttr) removeAttrIfPresent(img, outputSrcAttr)
     }
 
-    if (currentOpt.setDomSrc) {
+    if (setDomSrc) {
       setAttrIfChanged(img, 'src', displaySrc)
     }
 
@@ -545,9 +756,9 @@ export const applyImageTransforms = async (root, contextOrOptions = {}, markdown
     if (alt) setAttrIfChanged(img, 'alt', alt)
     const titleAttr = getAttr(img, 'title')
     const storedTitle = resizeDataAttr ? getAttr(img, resizeDataAttr) : ''
-    const titleResizeValue = currentOpt.resize ? normalizeResizeValue(titleAttr) : ''
+    const titleResizeValue = resizeEnabled ? normalizeResizeValue(titleAttr) : ''
     let storedResizeValue = ''
-    if (currentOpt.resize && storedTitle) {
+    if (resizeEnabled && storedTitle) {
       const normalizedStored = String(storedTitle).trim().replace('％', '%').toLowerCase()
       if (resizeValueReg.test(normalizedStored)) storedResizeValue = normalizedStored
     }
@@ -556,7 +767,7 @@ export const applyImageTransforms = async (root, contextOrOptions = {}, markdown
       ? titleAttr
       : (!titleAttr && storedResizeValue ? `resize:${storedResizeValue}` : '')
 
-    const removeTitle = currentOpt.autoHideResizeTitle && !!titleResizeValue
+    const removeTitle = autoHideResizeTitle && !!titleResizeValue
     if (removeTitle) {
       if (resizeDataAttr && resizeValue) setAttrIfChanged(img, resizeDataAttr, resizeValue)
       removeAttrIfPresent(img, 'title')
@@ -571,14 +782,14 @@ export const applyImageTransforms = async (root, contextOrOptions = {}, markdown
       }
     }
     const currentDecoding = getAttr(img, 'decoding')
-    const desiredDecoding = currentDecoding || (currentOpt.asyncDecode ? 'async' : '')
+    const desiredDecoding = currentDecoding || (asyncDecodeEnabled ? 'async' : '')
     if (desiredDecoding) {
       setAttrIfChanged(img, 'decoding', desiredDecoding)
     } else {
       removeAttrIfPresent(img, 'decoding')
     }
     const currentLoading = getAttr(img, 'loading')
-    const desiredLoading = currentLoading || (currentOpt.lazyLoad ? 'lazy' : '')
+    const desiredLoading = currentLoading || (lazyLoadEnabled ? 'lazy' : '')
     if (desiredLoading) {
       setAttrIfChanged(img, 'loading', desiredLoading)
     } else {
@@ -587,39 +798,20 @@ export const applyImageTransforms = async (root, contextOrOptions = {}, markdown
 
     const sizeSrc = finalSrc || srcRaw || loadSrc
     if (!sizeSrc || !imgExtReg.test(sizeSrc)) {
-      summary.skipped += 1
-      safeInvokeImageProcessed(onImageProcessed, img, {
-        status: 'skipped',
-        loadSrc,
-        finalSrc,
-        displaySrc,
-      }, currentOpt.suppressErrors === 'all')
+      markSkippedImage(img, loadSrc, finalSrc, displaySrc)
       continue
     }
-    if (!currentOpt.enableSizeProbe) {
-      summary.skipped += 1
-      safeInvokeImageProcessed(onImageProcessed, img, {
-        status: 'skipped',
-        loadSrc,
-        finalSrc,
-        displaySrc,
-      }, currentOpt.suppressErrors === 'all')
+    if (!enableSizeProbe) {
+      markSkippedImage(img, loadSrc, finalSrc, displaySrc)
       continue
     }
 
-    const payload = {
-      loadSrc,
-      sizeSrc,
-      resizeTitleForSize,
-      finalSrc,
-      displaySrc,
-    }
-    const promise = probeImage(img, payload).then((info) => {
-      if (info.status === 'sized') summary.sized += 1
-      else if (info.status === 'timeout') summary.timeout += 1
-      else if (info.status === 'failed') summary.failed += 1
+    const promise = probeImage(img, loadSrc, sizeSrc, resizeTitleForSize, finalSrc, displaySrc).then((status) => {
+      if (status === 'sized') summary.sized += 1
+      else if (status === 'timeout') summary.timeout += 1
+      else if (status === 'failed') summary.failed += 1
       else summary.skipped += 1
-      return info
+      return status
     })
     summary.pending += 1
     tasks.push(promise)
@@ -640,42 +832,101 @@ export const startObserver = async (root, contextOrOptions = {}, markdownCont = 
   if (typeof MutationObserver !== 'function') {
     return { disconnect: () => {} }
   }
+  const contextSeedOptions = contextOrOptions && contextOrOptions.opt
+    ? (contextOrOptions.seedOption || contextOrOptions.opt)
+    : contextOrOptions
 
   let context = contextOrOptions && contextOrOptions.opt
     ? contextOrOptions
-    : await createContext(markdownCont, contextOrOptions, root)
+    : await createContext(markdownCont, contextSeedOptions, root)
 
-  let scheduled = false
+  let disposed = false
+  let frameScheduled = false
+  let frameHandle = null
+  let frameUsesTimeout = false
+  let debounceHandle = null
   let running = false
   let pending = false
   let pendingAll = false
   const pendingImages = new Set()
+  const rootNode = root.documentElement || root.body || root
+  const observerOptionsBase = {
+    childList: true,
+    subtree: true,
+    attributes: true,
+  }
+  let observer = null
+  let observerAttributeFilter = []
+  let observedImgAttributes = context?.observedImgAttributes instanceof Set
+    ? context.observedImgAttributes
+    : new Set(normalizeObserveAttributeFilter(context?.opt?.observeAttributeFilter))
+  let observeDebounceMs = normalizeNonNegativeNumber(context?.opt?.observeDebounceMs, 0)
+  const hasSameObserverFilter = (current, next) => {
+    if (current.length !== next.length) return false
+    const currentSet = new Set(current)
+    for (const item of next) {
+      if (!currentSet.has(item)) return false
+    }
+    return true
+  }
+  const getObserverAttributeFilter = () => {
+    const filter = Array.from(observedImgAttributes)
+    if (context?.opt?.readMeta && !filter.includes('content')) filter.push('content')
+    return filter
+  }
+  const reconnectObserverIfNeeded = () => {
+    if (!observer) return
+    const nextFilter = getObserverAttributeFilter()
+    if (hasSameObserverFilter(observerAttributeFilter, nextFilter)) return
+    observerAttributeFilter = nextFilter
+    observer.disconnect()
+    observer.observe(rootNode, {
+      ...observerOptionsBase,
+      attributeFilter: observerAttributeFilter,
+    })
+  }
+  const refreshObserverConfig = () => {
+    observedImgAttributes = context?.observedImgAttributes instanceof Set
+      ? context.observedImgAttributes
+      : new Set(normalizeObserveAttributeFilter(context?.opt?.observeAttributeFilter))
+    observeDebounceMs = normalizeNonNegativeNumber(context?.opt?.observeDebounceMs, 0)
+  }
 
   const runProcess = async () => {
+    if (disposed) return
     if (running) {
       pending = true
       return
     }
     running = true
-    do {
-      pending = false
-      const useAll = pendingAll
-      const targets = useAll ? root : Array.from(pendingImages)
-      pendingAll = false
-      pendingImages.clear()
-      if (!context || !context.opt) {
-        context = await createContext(markdownCont, contextOrOptions, root)
-      }
-      await applyImageTransforms(targets, context)
-    } while (pending)
-    running = false
+    try {
+      do {
+        if (disposed) break
+        pending = false
+        const useAll = pendingAll
+        const targets = useAll ? root : Array.from(pendingImages)
+        pendingAll = false
+        pendingImages.clear()
+        if (!useAll && targets.length === 0) continue
+        if (!context || !context.opt) {
+          context = await createContext(markdownCont, contextSeedOptions, root)
+          refreshObserverConfig()
+          reconnectObserverIfNeeded()
+        }
+        await applyImageTransforms(targets, context)
+      } while (pending)
+    } finally {
+      running = false
+    }
   }
 
-  const scheduleProcess = () => {
-    if (scheduled) return
-    scheduled = true
+  const scheduleFrameProcess = () => {
+    if (disposed || frameScheduled) return
+    frameScheduled = true
     const run = () => {
-      scheduled = false
+      frameScheduled = false
+      frameHandle = null
+      if (disposed) return
       runProcess().catch((error) => {
         if (context?.opt?.suppressErrors !== 'all') {
           console.error('[renderer-image(dom)] MutationObserver processing failed.', error)
@@ -683,16 +934,30 @@ export const startObserver = async (root, contextOrOptions = {}, markdownCont = 
       })
     }
     if (typeof requestAnimationFrame === 'function') {
-      requestAnimationFrame(run)
+      frameUsesTimeout = false
+      frameHandle = requestAnimationFrame(run)
     } else {
-      setTimeout(run, 50)
+      frameUsesTimeout = true
+      frameHandle = setTimeout(run, 50)
     }
+  }
+  const scheduleProcess = () => {
+    if (disposed) return
+    if (observeDebounceMs > 0) {
+      if (debounceHandle) clearTimeout(debounceHandle)
+      debounceHandle = setTimeout(() => {
+        debounceHandle = null
+        scheduleFrameProcess()
+      }, observeDebounceMs)
+      return
+    }
+    scheduleFrameProcess()
   }
 
   const isElementNode = (node) => node && node.nodeType === 1
   const isMetaNode = (node) => {
     if (!context?.opt?.readMeta || !isElementNode(node)) return false
-    return node.tagName === 'META' && node.getAttribute('name') === 'markdown-frontmatter'
+    return hasTagName(node, 'meta', 'META') && node.getAttribute('name') === 'markdown-frontmatter'
   }
   const isImageNode = (node) => isElementNode(node) && isImgTag(node)
 
@@ -705,7 +970,9 @@ export const startObserver = async (root, contextOrOptions = {}, markdownCont = 
         continue
       }
       if (node.querySelectorAll) {
-        const images = node.querySelectorAll('img')
+        const images = typeof node.getElementsByTagName === 'function'
+          ? node.getElementsByTagName('img')
+          : node.querySelectorAll('img')
         for (const image of images) pendingImages.add(image)
       }
     }
@@ -721,22 +988,23 @@ export const startObserver = async (root, contextOrOptions = {}, markdownCont = 
     return false
   }
 
-  const attributeFilter = ['src', 'title', 'alt']
-  if (context?.opt?.readMeta) attributeFilter.push('content')
-
-  const observer = new MutationObserver((mutations) => {
+  observer = new MutationObserver((mutations) => {
+    if (disposed) return
     let shouldSchedule = false
     let metaChanged = false
     for (const mutation of mutations) {
       if (!mutation) continue
       if (mutation.type === 'attributes') {
         const target = mutation.target
-        if (isImageNode(target) && observedImgAttributes.has(mutation.attributeName)) {
+        const attributeName = typeof mutation.attributeName === 'string'
+          ? mutation.attributeName.toLowerCase()
+          : ''
+        if (isImageNode(target) && observedImgAttributes.has(attributeName)) {
           pendingImages.add(target)
           shouldSchedule = true
           continue
         }
-        if (isMetaNode(target) && mutation.attributeName === 'content') {
+        if (isMetaNode(target) && attributeName === 'content') {
           metaChanged = true
           shouldSchedule = true
           continue
@@ -767,16 +1035,30 @@ export const startObserver = async (root, contextOrOptions = {}, markdownCont = 
     if (shouldSchedule) scheduleProcess()
   })
 
-  const rootNode = root.documentElement || root.body || root
+  observerAttributeFilter = getObserverAttributeFilter()
   observer.observe(rootNode, {
-    childList: true,
-    subtree: true,
-    attributes: true,
-    attributeFilter,
+    ...observerOptionsBase,
+    attributeFilter: observerAttributeFilter,
   })
 
   return {
-    disconnect: () => observer.disconnect(),
+    disconnect: () => {
+      disposed = true
+      observer.disconnect()
+      if (debounceHandle) {
+        clearTimeout(debounceHandle)
+        debounceHandle = null
+      }
+      if (frameHandle != null) {
+        if (frameUsesTimeout) {
+          clearTimeout(frameHandle)
+        } else if (typeof cancelAnimationFrame === 'function') {
+          cancelAnimationFrame(frameHandle)
+        }
+        frameHandle = null
+      }
+      pendingImages.clear()
+    },
   }
 }
 
@@ -793,13 +1075,11 @@ export const runInPreview = async (setup = {}) => {
   const observe = !!safeSetup.observe
   const providedContext = safeSetup.context && safeSetup.context.opt ? safeSetup.context : null
 
-  const {
-    root: _root,
-    markdownCont: _markdownCont,
-    observe: _observe,
-    context: _context,
-    ...option
-  } = safeSetup
+  const option = { ...safeSetup }
+  delete option.root
+  delete option.markdownCont
+  delete option.observe
+  delete option.context
 
   const context = providedContext || await createContext(markdownCont, option, root)
   const summary = await applyImageTransforms(root, context)
