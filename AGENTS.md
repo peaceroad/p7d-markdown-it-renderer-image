@@ -61,6 +61,9 @@
 - `outputUrlMode: path-only` assumes same-origin and will drop the domain.
 - `previewMode: 'markdown'` keeps the markdown `src` for display; in VS Code Webview, relative paths may not resolve, so use `previewMode: 'output'` there.
 - On `file://` pages, the DOM script auto-sets `suppressErrors: 'local'` and disables `enableSizeProbe` unless explicitly overridden to reduce noisy local load errors.
+- VS Code preview + DOM observer/probe can show timing-sensitive layout issues after live `resize:` title edits (e.g., width constrained but height appears too large). Treat this as an interaction issue (Webview layout timing + observer/probe flow), not a confirmed single-side bug.
+- Current extension-side workaround (kept enabled): use `onImageProcessed` to enforce responsive style when unset (`img.style.height = "auto"`, `img.style.maxWidth = "100%"`) while keeping `enableSizeProbe: true`.
+- If the issue recurs, collect: `observeDebounceMs` A/B (`0` vs `250`), `onImageProcessed` logs (`width`, `height`, `data-img-resize`, `style.height`), and a minimal reproducible sample.
 
 ## Browser Notes
 - Safari Technology Preview 222: `<figcaption>` inside `<figure>` contributes to `<img>` accessible name only when no `alt`, ARIA, or `title` is present (295746@main / 150597445).
