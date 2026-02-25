@@ -126,27 +126,34 @@ const hasTagName = (node, lowerName, upperName) => {
 const isImgTag = (node) => {
   return hasTagName(node, 'img', 'IMG')
 }
+const collectImgFromIterable = (iterable) => {
+  const images = []
+  for (const node of iterable) {
+    if (isImgTag(node)) images.push(node)
+  }
+  return images
+}
 const collectImages = (root) => {
   if (!root) return []
-  if (Array.isArray(root)) return root.filter(isImgTag)
+  if (Array.isArray(root)) return collectImgFromIterable(root)
   if (isImgTag(root)) return [root]
   if (typeof root.getElementsByTagName === 'function') return Array.from(root.getElementsByTagName('img'))
   if (typeof root.querySelectorAll === 'function') return Array.from(root.querySelectorAll('img'))
-  if (typeof root !== 'string' && typeof root[Symbol.iterator] === 'function') return Array.from(root).filter(isImgTag)
+  if (typeof root !== 'string' && typeof root[Symbol.iterator] === 'function') return collectImgFromIterable(root)
   return []
+}
+const resolveOwnerFromItem = (item) => {
+  if (!item || (typeof item !== 'object' && typeof item !== 'function')) return null
+  if (item.nodeType === 9) return item
+  if (item.ownerDocument && typeof item.ownerDocument === 'object') return item.ownerDocument
+  if (item.documentElement || item.body) return item
+  return null
 }
 const resolveOwnerFromIterable = (value) => {
   if (!value || typeof value === 'string') return null
-  const resolveFromItem = (item) => {
-    if (!item || (typeof item !== 'object' && typeof item !== 'function')) return null
-    if (item.nodeType === 9) return item
-    if (item.ownerDocument && typeof item.ownerDocument === 'object') return item.ownerDocument
-    if (item.documentElement || item.body) return item
-    return null
-  }
   if (Array.isArray(value) || typeof value.length === 'number') {
     for (let index = 0; index < value.length; index += 1) {
-      const owner = resolveFromItem(value[index])
+      const owner = resolveOwnerFromItem(value[index])
       if (owner) return owner
     }
     return null
@@ -154,7 +161,7 @@ const resolveOwnerFromIterable = (value) => {
   if (typeof value.size === 'number' && value.size > 0 && typeof value.values === 'function') {
     const iterator = value.values()
     if (!iterator || typeof iterator.next !== 'function') return null
-    return resolveFromItem(iterator.next().value)
+    return resolveOwnerFromItem(iterator.next().value)
   }
   return null
 }
@@ -381,19 +388,22 @@ export const createContext = async (markdownCont = '', option = {}, root = null)
   if (typeof currentOpt.enableSizeProbe !== 'boolean') {
     currentOpt.enableSizeProbe = true
   }
+  const resolveSrcEnabled = currentOpt.resolveSrc
 
-  const resolvedFrontmatter = getFrontmatter(frontmatter, currentOpt) || {}
+  const resolvedFrontmatter = getFrontmatter(frontmatter) || {}
   const { url, urlimage, urlimagebase, lid, lmd, imageDir, hasImageDir, imageScale } = resolvedFrontmatter
-  const imageBase = resolveImageBase({
-    url,
-    urlimage,
-    urlimagebase: urlimagebase || currentOpt.urlImageBase,
-  })
-  const lidPattern = lid
+  const imageBase = resolveSrcEnabled
+    ? resolveImageBase({
+      url,
+      urlimage,
+      urlimagebase: urlimagebase || currentOpt.urlImageBase,
+    })
+    : ''
+  const lidPattern = resolveSrcEnabled && lid
     ? new RegExp('^(?:\\.\\/)?' + escapeForRegExp(lid).replace(/\//g, '\\/'))
     : null
   let adjustedLmd = ''
-  if (lmd) {
+  if (resolveSrcEnabled && lmd) {
     adjustedLmd = String(lmd).replace(/\\/g, '/')
     if (!isProtocolRelativeUrl(adjustedLmd) && !isFileUrl(adjustedLmd) && !hasUrlScheme(adjustedLmd) && !hasSpecialScheme(adjustedLmd)) {
       if (isAbsolutePath(adjustedLmd)) {
@@ -492,6 +502,7 @@ export const applyImageTransforms = async (root, contextOrOptions = {}, markdown
   const resolveSrcEnabled = currentOpt.resolveSrc
   const outputUrlMode = currentOpt.outputUrlMode
   const previewMode = currentOpt.previewMode
+  const usesStoredOriginalSrc = previewMode !== 'output'
   const loadSrcStrategy = currentOpt.loadSrcStrategy
   const hasLoadSrcPrefixMap = loadSrcPrefixEntries.length > 0
   const setDomSrc = currentOpt.setDomSrc
@@ -502,7 +513,10 @@ export const applyImageTransforms = async (root, contextOrOptions = {}, markdown
   const asyncDecodeEnabled = currentOpt.asyncDecode
   const lazyLoadEnabled = currentOpt.lazyLoad
   const enableSizeProbe = currentOpt.enableSizeProbe
+  const awaitSizeProbes = currentOpt.awaitSizeProbes
   const hasImageProcessedHook = !!onImageProcessed
+  const suppressLocalByMode = suppressErrorMode === 'local'
+  const suppressRemoteByMode = suppressErrorMode === 'remote'
 
   const emitImageProcessed = (img, status, width, height, loadSrc, finalSrc, displaySrc) => {
     if (!hasImageProcessedHook) return
@@ -596,7 +610,14 @@ export const applyImageTransforms = async (root, contextOrOptions = {}, markdown
     })
   }
   const resolveProbeResult = (loadSrc, suppressLoadErrors) => {
-    if (!probeCacheState || probeCacheMaxEntries <= 0 || !loadSrc) {
+    if (!loadSrc) {
+      return Promise.resolve({
+        status: 'failed',
+        naturalWidth: 0,
+        naturalHeight: 0,
+      })
+    }
+    if (!probeCacheState || probeCacheMaxEntries <= 0) {
       return loadImageProbeResult(loadSrc, suppressLoadErrors)
     }
     const cacheKey = String(loadSrc)
@@ -630,8 +651,7 @@ export const applyImageTransforms = async (root, contextOrOptions = {}, markdown
     const imgName = getImageName(sizeSrc)
     const isRemoteForError = isHttpUrl(loadSrc) || isProtocolRelativeUrl(loadSrc)
     const suppressLoadErrors = suppressAllErrors
-      || (suppressErrorMode === 'local' && !isRemoteForError)
-      || (suppressErrorMode === 'remote' && isRemoteForError)
+      || (isRemoteForError ? suppressRemoteByMode : suppressLocalByMode)
 
     return resolveProbeResult(loadSrc, suppressLoadErrors)
       .then((probeResult) => applyProbeResultToImage(
@@ -649,7 +669,7 @@ export const applyImageTransforms = async (root, contextOrOptions = {}, markdown
     emitImageProcessed(img, 'skipped', 0, 0, loadSrc, finalSrc, displaySrc)
   }
 
-  const tasks = []
+  const tasks = awaitSizeProbes ? [] : null
 
   for (const img of images) {
     if (!img) continue
@@ -659,8 +679,8 @@ export const applyImageTransforms = async (root, contextOrOptions = {}, markdown
     }
     summary.processed += 1
 
-    const storedOriginalSrc = getAttr(img, originalSrcAttr)
-    const useStored = previewMode !== 'output' && storedOriginalSrc
+    const storedOriginalSrc = usesStoredOriginalSrc ? getAttr(img, originalSrcAttr) : ''
+    const useStored = usesStoredOriginalSrc && storedOriginalSrc
     const srcRaw = useStored ? storedOriginalSrc : getAttr(img, 'src')
     const srcBase = stripQueryHash(srcRaw)
     const srcSuffix = srcRaw.slice(srcBase.length)
@@ -814,14 +834,13 @@ export const applyImageTransforms = async (root, contextOrOptions = {}, markdown
       return status
     })
     summary.pending += 1
-    tasks.push(promise)
+    if (tasks) tasks.push(promise)
+    else promise.catch(() => {})
   }
 
-  if (currentOpt.awaitSizeProbes) {
+  if (tasks) {
     await Promise.allSettled(tasks)
     summary.pending = 0
-  } else {
-    for (const task of tasks) task.catch(() => {})
   }
 
   return summary

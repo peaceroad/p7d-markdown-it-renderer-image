@@ -96,12 +96,9 @@ const getLocalImgSrc = (imgSrc, mdDir) => {
     }
   }
   if (mdDir === '') return ''
-  const cleanSrc = imgSrc.includes('?') || imgSrc.includes('#')
-    ? stripQueryHash(imgSrc)
-    : imgSrc
+  const cleanSrc = stripQueryHash(imgSrc)
   const decodedSrc = safeDecodeUri(cleanSrc)
-  const finalSrc = decodedSrc === cleanSrc ? cleanSrc : decodedSrc
-  return path.resolve(mdDir, finalSrc.replace(/[/\\]/g, path.sep))
+  return path.resolve(mdDir, decodedSrc.replace(/[/\\]/g, path.sep))
 }
 
 const getImgData = (src, isRemote, timeout, cache, cacheMax, failedSet, suppressLoadErrors, suppressLocalErrors, suppressRemoteErrors, remoteMaxBytes) => {
@@ -248,15 +245,12 @@ const mditRendererImage = (md, option) => {
 
     if (isValidExt) {
       let srcPath = ''
-      let hasSrcPath = false
       if (isRemote) {
         if (remoteSizeEnabled) {
           srcPath = toAbsoluteRemote(srcRaw)
-          hasSrcPath = !!srcPath
         }
       } else {
         srcPath = getLocalImgSrc(srcBase, mdDir)
-        hasSrcPath = !!srcPath
       }
 
       if (!srcPath && !isRemote && !isFile && !missingMdPathWarnings.has(warningKey) && !globalMissingMdPathWarnings.has(warningKey)) {
@@ -265,7 +259,7 @@ const mditRendererImage = (md, option) => {
         addToBoundedSet(globalMissingMdPathWarnings, warningKey)
       }
 
-      const imgData = hasSrcPath
+      const imgData = srcPath
         ? getImgData(
           srcPath,
           isRemote,
@@ -319,7 +313,7 @@ const mditRendererImage = (md, option) => {
     const hasFrontmatter = hasOwnEnumerableKeys(frontmatter)
     const shouldParseFrontmatter = hasFrontmatter || hasOptUrlImageBase
     const parsedFrontmatter = shouldParseFrontmatter
-      ? (getFrontmatter(frontmatter || {}, opt) || {})
+      ? (getFrontmatter(frontmatter || {}) || {})
       : {}
     const imageScale = shouldParseFrontmatter ? parsedFrontmatter.imageScale : null
     const imageBase = shouldParseFrontmatter

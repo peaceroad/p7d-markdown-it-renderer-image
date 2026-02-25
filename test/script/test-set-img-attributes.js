@@ -1888,4 +1888,30 @@ await runTest(62, 'startObserver(context) preserves readMeta on re-create', asyn
   }
 })
 
+// Test 63: resolveSrc false keeps probe source on markdown src even with lmd
+await runTest(63, 'resolveSrc false ignores lmd for probe source', async () => {
+  const images = [
+    new MockElement('img', { src: 'cats/cat.jpg', alt: 'cat' })
+  ]
+  const markdownWithYaml = `---
+lmd: /assets/images
+url: https://example.com/page
+urlimage: https://cdn.example.com/assets/
+---`
+  const loadSrcs = []
+
+  await testSetImageAttributes(
+    images,
+    { resolveSrc: false, previewMode: 'local' },
+    markdownWithYaml,
+    null,
+    (value) => loadSrcs.push(value)
+  )
+
+  const img = images[0]
+  assert.strictEqual(img.getAttribute('src'), 'cats/cat.jpg')
+  assert.ok(loadSrcs.includes('cats/cat.jpg'))
+  assert.ok(!loadSrcs.includes('/assets/images/cats/cat.jpg'))
+})
+
 console.log('All tests passed')

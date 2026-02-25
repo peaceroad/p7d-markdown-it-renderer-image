@@ -13,6 +13,37 @@ const windowsAbsolutePathReg = /^[A-Za-z]:\//
 const absoluteUrlReg = /^(?:[a-z][a-z0-9+.-]*:)?\/\//i
 const htmlFileReg = /\.(html|htm|xhtml)$/i
 const urlPathReg = /^([a-z]+:\/\/)(.*)/
+const slashCharCode = 47
+const dotCharCode = 46
+
+const needsPathNormalization = (text) => {
+  const len = text.length
+  if (len === 0) return false
+  if (text === '.') return true
+  if (text === '/') return true
+  if (len >= 2 && text.charCodeAt(0) === dotCharCode && text.charCodeAt(1) === slashCharCode) return true
+  if (len > 1 && text.charCodeAt(len - 1) === slashCharCode) return true
+
+  for (let i = 0; i < len; i += 1) {
+    if (text.charCodeAt(i) !== slashCharCode) continue
+    const next = i + 1
+    if (next >= len) continue
+    const nextCode = text.charCodeAt(next)
+    if (nextCode === slashCharCode) return true
+    if (nextCode !== dotCharCode) continue
+
+    const afterDot = next + 1
+    if (afterDot >= len) return true // '/.'
+    const afterDotCode = text.charCodeAt(afterDot)
+    if (afterDotCode === slashCharCode) return true // '/./'
+    if (afterDotCode !== dotCharCode) continue
+
+    const afterDoubleDot = afterDot + 1
+    if (afterDoubleDot >= len) return true // '/..'
+    if (text.charCodeAt(afterDoubleDot) === slashCharCode) return true // '/../'
+  }
+  return false
+}
 
 const toText = (value) => {
   if (typeof value === 'string') return value
@@ -100,6 +131,7 @@ const normalizeRelativePath = (path) => {
     const pathPart = urlSchemeMatch[2]
     return scheme + normalizeRelativePath(pathPart)
   }
+  if (!needsPathNormalization(text)) return text
   
   const isAbsolute = text.startsWith('/')
   const segments = text.split('/')
@@ -295,7 +327,7 @@ const setImgSize = (imgName, imgData, scaleSuffix, resize, title, imageScale, no
   return { width: w, height: h }
 }
 
-const getFrontmatter = (frontmatter, opt) => {
+const getFrontmatter = (frontmatter) => {
   if (!frontmatter || typeof frontmatter !== 'object' || Array.isArray(frontmatter)) return null
 
   let lid = toText(frontmatter.lid)
