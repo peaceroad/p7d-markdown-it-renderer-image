@@ -27,10 +27,12 @@ const defaultDomOptions = Object.freeze({
   probeCacheMaxEntries: 0, // cross-run size-probe cache size (0 disables)
   probeCacheTtlMs: 0, // positive probe cache TTL in ms
   probeNegativeCacheTtlMs: 0, // failed/timeout probe cache TTL in ms
+  keepPreviousDimensionsDuringResizeEdit: false, // keep width/height while resize hint is pending
   enableSizeProbe: true, // run image size probing
   awaitSizeProbes: true, // await image load for size calculation
   sizeProbeTimeoutMs: 3000, // timeout for size probe (0 disables)
   onImageProcessed: null, // per-image callback
+  onResizeHintEditingStateChange: null, // resize hint state transition callback
   suppressNoopWarning: false, // silence browser default-export warning
   readMeta: false, // read meta[name="markdown-frontmatter"]
 })

@@ -14,7 +14,7 @@
 4. Frontmatter resolution and base URL are cached per render to avoid recompute.
 
 ## script/set-img-attributes.js (browser)
-1. Exports `createContext`, `applyImageTransforms`, `applyImageTransformsToString`, `startObserver`, and `runInPreview`.
+1. Exports `classifyResizeHint`, `createContext`, `applyImageTransforms`, `applyImageTransformsToString`, `startObserver`, and `runInPreview`.
    - Also exports `defaultSharedOptions`, `defaultDomOptions`, `defaultNodeOptions` for shared defaults.
    - `runInPreview({ root, markdownCont, observe, ... })` is a high-level helper for preview usage (create context + apply + optional observer).
    - Default export is a no-op shim returning `Promise.resolve()`; `suppressNoopWarning` silences the browser warning.
@@ -26,11 +26,13 @@
    - `previewMode`: `output` | `markdown` | `local`. When not `output`, store final URL in `previewOutputSrcAttr` and cache original `src` in `data-img-src-raw`.
    - `setDomSrc: false` keeps `img.src` untouched while still running size probes.
    - `enableSizeProbe: false` skips size probing entirely (no network or image load).
+   - `keepPreviousDimensionsDuringResizeEdit: true` keeps existing width/height while title is in a `pending` resize state (`src` unchanged + size attrs present).
    - `loadSrcStrategy` chooses the probe source (`output` | `raw` | `display`).
    - `loadSrcPrefixMap` rewrites probe URLs by prefix (JSON-friendly).
    - `loadSrcResolver` / `loadSrcMap` can override the measurement source (`loadSrc`) for size calculation.
    - Optional probe cache across apply runs: `probeCacheMaxEntries` (bounded cache size), `probeCacheTtlMs` (success TTL), `probeNegativeCacheTtlMs` (failed/timeout TTL). In-flight probe requests are de-duplicated by `loadSrc`.
    - Returns a summary object `{ total, processed, pending, sized, failed, timeout, skipped }` and optionally calls `onImageProcessed(img, info)` per image.
+   - `onResizeHintEditingStateChange(img, info)` is called on resize-hint state transitions only (`previousState` is `null` on first emit).
    - Uses `awaitSizeProbes` and `sizeProbeTimeoutMs` to control async sizing.
 4. `applyImageTransformsToString(html, contextOrOptions)` uses `DOMParser` to transform an HTML string and returns the updated HTML.
 5. `startObserver(root, contextOrOptions)` runs a MutationObserver and re-applies transforms; returns `{ disconnect }`.
@@ -40,7 +42,7 @@
    - If a prebuilt context is passed, observer re-creation uses the original option seed (`context.seedOption`) so runtime meta options are not accidentally frozen as explicit overrides.
 
 ## Utilities (script/img-util.js)
-- Frontmatter parsing, path normalization, resize/scaleSuffix regexes, image base resolution, and size adjustment (`setImgSize`).
+- Frontmatter parsing, path normalization, resize classification (`classifyResizeHint`), resize/scaleSuffix regexes, image base resolution, and size adjustment (`setImgSize`).
 - Frontmatter normalization removes only a leading `./` (not arbitrary single-character prefixes).
 - URL path extraction treats only `.html`, `.htm`, `.xhtml` as file names; other dotted segments are kept as directories.
 - Shared URL helpers (scheme checks, basename, extension regex, `applyOutputUrlMode`) are centralized here and used by both Node and DOM.

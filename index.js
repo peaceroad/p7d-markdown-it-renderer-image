@@ -22,6 +22,7 @@ import {
 } from './script/img-util.js'
 
 export { defaultSharedOptions, defaultDomOptions, defaultNodeOptions }
+export { classifyResizeHint } from './script/img-util.js'
 
 const globalFailedImgLoads = new Set()
 const globalMissingMdPathWarnings = new Set()

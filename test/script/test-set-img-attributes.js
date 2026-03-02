@@ -1914,4 +1914,111 @@ urlimage: https://cdn.example.com/assets/
   assert.ok(!loadSrcs.includes('/assets/images/cats/cat.jpg'))
 })
 
+// Test 64: keepPreviousDimensionsDuringResizeEdit keeps size while resize hint is pending
+await runTest(64, 'keepPreviousDimensionsDuringResizeEdit keeps pending size', async () => {
+  const images = [
+    new MockElement('img', { src: 'cat.jpg', alt: 'cat', title: 'resize:50%' })
+  ]
+  images[0].naturalWidth = 800
+  images[0].naturalHeight = 600
+  const originalDocument = global.document
+  const originalImage = global.Image
+  global.document = createMockDocument(images)
+  global.Image = class DynamicMockImage extends MockElement {
+    constructor() {
+      super('img')
+      this.complete = false
+      this.naturalWidth = 800
+      this.naturalHeight = 600
+      this.onload = null
+      this.onerror = null
+    }
+    setAttribute(name, value) {
+      super.setAttribute(name, value)
+      if (name !== 'src') return
+      const correspondingImg = images.find((img) => img.getAttribute('src') === value)
+      if (correspondingImg) {
+        this.naturalWidth = correspondingImg.naturalWidth || 800
+        this.naturalHeight = correspondingImg.naturalHeight || 600
+      }
+      this.complete = true
+      if (this.onload) setTimeout(() => this.onload(), 0)
+    }
+  }
+
+  try {
+    const mod = await loadDomModule()
+    const context = await mod.createContext('', {
+      resize: true,
+      autoHideResizeTitle: false,
+      keepPreviousDimensionsDuringResizeEdit: true,
+    }, global.document)
+
+    await mod.applyImageTransforms(global.document, context)
+    assert.strictEqual(images[0].getAttribute('width'), '400')
+    assert.strictEqual(images[0].getAttribute('height'), '300')
+
+    images[0].setAttribute('title', 'res')
+    await mod.applyImageTransforms(global.document, context)
+    assert.strictEqual(images[0].getAttribute('width'), '400')
+    assert.strictEqual(images[0].getAttribute('height'), '300')
+  } finally {
+    global.document = originalDocument
+    global.Image = originalImage
+  }
+})
+
+// Test 65: onResizeHintEditingStateChange fires only on state transition
+await runTest(65, 'onResizeHintEditingStateChange reports transitions', async () => {
+  const images = [
+    new MockElement('img', { src: 'cat.jpg', alt: 'cat', title: '' })
+  ]
+  const originalDocument = global.document
+  global.document = createMockDocument(images)
+  const events = []
+
+  try {
+    const mod = await loadDomModule()
+    const context = await mod.createContext('', {
+      resize: true,
+      enableSizeProbe: false,
+      onResizeHintEditingStateChange: (_img, info) => {
+        events.push({
+          state: info.state,
+          previousState: info.previousState,
+          normalizedResizeValue: info.normalizedResizeValue,
+          previousSize: info.previousSize,
+        })
+      },
+    }, global.document)
+
+    await mod.applyImageTransforms(global.document, context)
+    images[0].setAttribute('title', 'res')
+    await mod.applyImageTransforms(global.document, context)
+    await mod.applyImageTransforms(global.document, context)
+    images[0].setAttribute('title', 'resize:300px')
+    await mod.applyImageTransforms(global.document, context)
+    images[0].setAttribute('title', 'hello')
+    await mod.applyImageTransforms(global.document, context)
+    images[0].setAttribute('title', '')
+    await mod.applyImageTransforms(global.document, context)
+
+    assert.strictEqual(events.length, 5)
+    assert.deepStrictEqual(events.map((event) => ({
+      state: event.state,
+      previousState: event.previousState,
+      normalizedResizeValue: event.normalizedResizeValue,
+    })), [
+      { state: 'empty', previousState: null, normalizedResizeValue: '' },
+      { state: 'pending', previousState: 'empty', normalizedResizeValue: '' },
+      { state: 'valid', previousState: 'pending', normalizedResizeValue: '300px' },
+      { state: 'invalid', previousState: 'valid', normalizedResizeValue: '' },
+      { state: 'empty', previousState: 'invalid', normalizedResizeValue: '' },
+    ])
+    assert.strictEqual(events[0].previousSize, null)
+  } finally {
+    global.document = originalDocument
+  }
+})
+
 console.log('All tests passed')

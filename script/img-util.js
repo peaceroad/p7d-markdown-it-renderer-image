@@ -1,6 +1,9 @@
 const scaleSuffixReg = /[@._-]([0-9]+)(x|dpi|ppi)$/
 const resizeReg = /(?:(?:(?:大きさ|サイズ)の?変更|リサイズ|resize(?:d to)?) *[:：]? *([0-9]+(?:\.[0-9]+)?)([%％]|px)|([0-9]+(?:\.[0-9]+)?)([%％]|px)[にへ](?:(?:大きさ|サイズ)を?変更|リサイズ))/i
 const resizeValueReg = /^([0-9]+(?:\.[0-9]+)?)(%|px)$/i
+const resizePendingPrefixReg = /^(?:r|re|res|resi|resiz|resize|resized|resized t|resized to)$/i
+const resizePendingValueReg = /^(?:resize(?:d to)?)\s*[:：]?\s*(?:[0-9]+(?:\.[0-9]*)?\s*(?:%|％|p|px)?)?$/i
+const resizePendingJaValueReg = /^(?:リ|リサ|リサイ|リサイズ)\s*[:：]?\s*(?:[0-9]+(?:\.[0-9]*)?\s*(?:%|％|p|px)?)?$/i
 const yamlReg = /^--- *\n([\s\S]*?)\n---/
 const percentEncodedReg = /%[0-9A-Fa-f]{2}/
 const encodedSlashReg = /%2f|%5c/i
@@ -15,6 +18,9 @@ const htmlFileReg = /\.(html|htm|xhtml)$/i
 const urlPathReg = /^([a-z]+:\/\/)(.*)/
 const slashCharCode = 47
 const dotCharCode = 46
+const lowerRCharCode = 114
+const upperRCharCode = 82
+const katakanaRiCharCode = 12522
 
 const needsPathNormalization = (text) => {
   const len = text.length
@@ -253,6 +259,28 @@ const normalizeResizeValue = (value) => {
   return ''
 }
 
+const classifyResizeHint = (title) => {
+  const text = toText(title).trim()
+  if (!text) {
+    return { state: 'empty', normalizedResizeValue: '' }
+  }
+  const normalizedResizeValue = normalizeResizeValue(text)
+  if (normalizedResizeValue) {
+    return { state: 'valid', normalizedResizeValue }
+  }
+  const firstCharCode = text.charCodeAt(0)
+  if (firstCharCode === lowerRCharCode || firstCharCode === upperRCharCode) {
+    if (resizePendingPrefixReg.test(text) || resizePendingValueReg.test(text)) {
+      return { state: 'pending', normalizedResizeValue: '' }
+    }
+  } else if (firstCharCode === katakanaRiCharCode) {
+    if (resizePendingJaValueReg.test(text)) {
+      return { state: 'pending', normalizedResizeValue: '' }
+    }
+  }
+  return { state: 'invalid', normalizedResizeValue: '' }
+}
+
 const parseResizeValue = (value) => {
   const normalized = normalizeResizeValue(value)
   if (!normalized) return null
@@ -260,7 +288,7 @@ const parseResizeValue = (value) => {
   if (!match) return null
   const numericValue = Number(match[1])
   if (!Number.isFinite(numericValue)) return null
-  return { value: numericValue, unit: match[2], normalized }
+  return { value: numericValue, unit: match[2] }
 }
 
 const parseImageScale = (value) => {
@@ -411,6 +439,7 @@ const applyOutputUrlMode = (value, mode) => {
 export {
   scaleSuffixReg, resizeReg, resizeValueReg,
   normalizeResizeValue,
+  classifyResizeHint,
   safeDecodeUri,
   stripQueryHash,
   normalizeExtensions,

@@ -4,7 +4,7 @@ import path from 'path'
 import mdit from 'markdown-it'
 import mditMeta from 'markdown-it-meta'
 import mditRendererImage from '../index.js'
-import { parseFrontmatter, normalizeRelativePath, getFrontmatter } from '../script/img-util.js'
+import { parseFrontmatter, normalizeRelativePath, getFrontmatter, classifyResizeHint } from '../script/img-util.js'
 
 let __dirname = path.dirname(new URL(import.meta.url).pathname)
 const isWindows = (process.platform === 'win32')
@@ -269,6 +269,47 @@ try {
   const fmRelativeImageDir = getFrontmatter({ urlimage: 'a/path' }, {})
   assert.strictEqual(fmRelativeImageDir.hasImageDir, true)
   assert.strictEqual(fmRelativeImageDir.imageDir, 'a/path/')
+
+  assert.deepStrictEqual(classifyResizeHint(''), {
+    state: 'empty',
+    normalizedResizeValue: '',
+  })
+  assert.deepStrictEqual(classifyResizeHint('res'), {
+    state: 'pending',
+    normalizedResizeValue: '',
+  })
+  assert.deepStrictEqual(classifyResizeHint('resize:'), {
+    state: 'pending',
+    normalizedResizeValue: '',
+  })
+  assert.deepStrictEqual(classifyResizeHint('resize:300'), {
+    state: 'pending',
+    normalizedResizeValue: '',
+  })
+  assert.deepStrictEqual(classifyResizeHint('resize:300px'), {
+    state: 'valid',
+    normalizedResizeValue: '300px',
+  })
+  assert.deepStrictEqual(classifyResizeHint('resize:50%'), {
+    state: 'valid',
+    normalizedResizeValue: '50%',
+  })
+  assert.deepStrictEqual(classifyResizeHint('リサ'), {
+    state: 'pending',
+    normalizedResizeValue: '',
+  })
+  assert.deepStrictEqual(classifyResizeHint('リサイズ:300'), {
+    state: 'pending',
+    normalizedResizeValue: '',
+  })
+  assert.deepStrictEqual(classifyResizeHint('リサイズ:300px'), {
+    state: 'valid',
+    normalizedResizeValue: '300px',
+  })
+  assert.deepStrictEqual(classifyResizeHint('hello'), {
+    state: 'invalid',
+    normalizedResizeValue: '',
+  })
 } catch (e) {
   pass = false
   console.log('incorrect(non-string guards): ')

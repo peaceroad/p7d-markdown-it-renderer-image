@@ -140,7 +140,9 @@ Notes:
 - `probeCacheMaxEntries` (default: `0`): Cross-run probe cache size (`0` disables).
 - `probeCacheTtlMs` (default: `0`): Success cache TTL (ms).
 - `probeNegativeCacheTtlMs` (default: `0`): Failure/timeout cache TTL (ms).
+- `keepPreviousDimensionsDuringResizeEdit` (default: `false`): While resize title is in a `pending` state, keep current `width`/`height` when `src` is unchanged and size attrs already exist.
 - `onImageProcessed` (default: `null`): Hook: `(imgEl, info) => {}`.
+- `onResizeHintEditingStateChange` (default: `null`): Hook called on resize hint state transitions: `(imgEl, { state, previousState, title, normalizedResizeValue, previousSize }) => {}`.
 - `suppressNoopWarning` (default: `false`): Silence browser default-export warning.
 
 Additional DOM behavior:
@@ -201,11 +203,17 @@ Probe cache behavior:
 
 ## API Summary (DOM Helper)
 
+- `classifyResizeHint(title)` -> `{ state, normalizedResizeValue }`
 - `createContext(markdownCont, options, root)`
 - `applyImageTransforms(root, contextOrOptions, markdownCont?)`
 - `applyImageTransformsToString(html, contextOrOptions, markdownCont?)`
 - `startObserver(root, contextOrOptions, markdownCont?)`
 - `runInPreview({ root, markdownCont, observe, context, ...options })`
+
+## Resize Hint Classification (DOM)
+
+- `classifyResizeHint(title)` returns `state: 'valid' | 'pending' | 'invalid' | 'empty'`.
+- `normalizedResizeValue` is non-empty only for `state === 'valid'`.
 
 ## Remote Images on Node
 

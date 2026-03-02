@@ -5,6 +5,7 @@ import {
   normalizeRelativePath,
   resolveImageBase,
   normalizeResizeValue,
+  classifyResizeHint,
   resizeValueReg,
   normalizeExtensions,
   isHttpUrl,
@@ -22,7 +23,7 @@ import {
 } from './img-util.js'
 import { defaultSharedOptions, defaultDomOptions, defaultNodeOptions } from './default-options.js'
 
-export { defaultSharedOptions, defaultDomOptions, defaultNodeOptions }
+export { defaultSharedOptions, defaultDomOptions, defaultNodeOptions, classifyResizeHint }
 
 const getAttr = (element, name) => {
   if (!element) return ''
@@ -55,9 +56,11 @@ const parseJsonSafe = (value) => {
 }
 const originalSrcAttr = 'data-img-src-raw'
 const defaultObservedImgAttributes = Object.freeze(['src', 'title', 'alt'])
+const emptyResizeHintInfo = Object.freeze({ state: 'empty', normalizedResizeValue: '' })
 const allowedPreviewModes = new Set(['output', 'markdown', 'local'])
 const allowedLoadSrcStrategies = new Set(['output', 'raw', 'display'])
 const probeCacheByOwner = new WeakMap()
+const resizeHintStateByImage = new WeakMap()
 const createSummary = (total = 0) => ({
   total,
   processed: 0,
@@ -67,6 +70,11 @@ const createSummary = (total = 0) => ({
   timeout: 0,
   skipped: 0,
 })
+const readPositiveIntAttr = (element, name) => {
+  const value = Number(getAttr(element, name))
+  if (!Number.isFinite(value) || value <= 0) return 0
+  return Math.round(value)
+}
 const safeInvokeImageProcessed = (handler, img, info, suppressErrors = false) => {
   if (!handler) return
   try {
@@ -74,6 +82,16 @@ const safeInvokeImageProcessed = (handler, img, info, suppressErrors = false) =>
   } catch (error) {
     if (!suppressErrors && typeof console !== 'undefined' && console && typeof console.error === 'function') {
       console.error('[renderer-image(dom)] onImageProcessed hook failed.', error)
+    }
+  }
+}
+const safeInvokeResizeHintStateChange = (handler, img, info, suppressErrors = false) => {
+  if (!handler) return
+  try {
+    handler(img, info)
+  } catch (error) {
+    if (!suppressErrors && typeof console !== 'undefined' && console && typeof console.error === 'function') {
+      console.error('[renderer-image(dom)] onResizeHintEditingStateChange hook failed.', error)
     }
   }
 }
@@ -226,6 +244,7 @@ const sharedContextUtils = Object.freeze({
   setImgSize,
   normalizeRelativePath,
   normalizeResizeValue,
+  classifyResizeHint,
   resizeValueReg,
   normalizeExtensions,
   isHttpUrl,
@@ -303,6 +322,8 @@ export const createContext = async (markdownCont = '', option = {}, root = null)
     setBool('enableSizeProbe', rendererSettings.enableSizeProbe)
     setBool('awaitSizeProbes', rendererSettings.awaitSizeProbes)
     setBool('suppressNoopWarning', rendererSettings.suppressNoopWarning)
+    setBool('autoHideResizeTitle', rendererSettings.autoHideResizeTitle)
+    setBool('keepPreviousDimensionsDuringResizeEdit', rendererSettings.keepPreviousDimensionsDuringResizeEdit)
     setString('previewMode', rendererSettings.previewMode)
     setString('loadSrcStrategy', rendererSettings.loadSrcStrategy)
     setString('urlImageBase', rendererSettings.urlImageBase)
@@ -313,6 +334,7 @@ export const createContext = async (markdownCont = '', option = {}, root = null)
     setString('suppressErrors', rendererSettings.suppressErrors)
     setFunc('loadSrcResolver', rendererSettings.loadSrcResolver)
     setFunc('onImageProcessed', rendererSettings.onImageProcessed)
+    setFunc('onResizeHintEditingStateChange', rendererSettings.onResizeHintEditingStateChange)
     setObject('loadSrcMap', rendererSettings.loadSrcMap)
     setObject('loadSrcPrefixMap', rendererSettings.loadSrcPrefixMap)
     setArray('observeAttributeFilter', rendererSettings.observeAttributeFilter)
@@ -321,10 +343,6 @@ export const createContext = async (markdownCont = '', option = {}, root = null)
     setNumber('probeCacheMaxEntries', rendererSettings.probeCacheMaxEntries)
     setNumber('probeCacheTtlMs', rendererSettings.probeCacheTtlMs)
     setNumber('probeNegativeCacheTtlMs', rendererSettings.probeNegativeCacheTtlMs)
-
-    if (!optionOverrides.has('autoHideResizeTitle') && typeof rendererSettings.autoHideResizeTitle === 'boolean') {
-      targetOpt.autoHideResizeTitle = rendererSettings.autoHideResizeTitle
-    }
   }
 
   let frontmatter = {}
@@ -478,7 +496,7 @@ export const applyImageTransforms = async (root, contextOrOptions = {}, markdown
   const {
     setImgSize,
     normalizeRelativePath,
-    normalizeResizeValue,
+    classifyResizeHint,
     resizeValueReg,
     isHttpUrl,
     isProtocolRelativeUrl,
@@ -512,9 +530,15 @@ export const applyImageTransforms = async (root, contextOrOptions = {}, markdown
   const autoHideResizeTitle = currentOpt.autoHideResizeTitle
   const asyncDecodeEnabled = currentOpt.asyncDecode
   const lazyLoadEnabled = currentOpt.lazyLoad
+  const keepPreviousDimensionsDuringResizeEdit = !!(resizeEnabled && currentOpt.keepPreviousDimensionsDuringResizeEdit)
   const enableSizeProbe = currentOpt.enableSizeProbe
   const awaitSizeProbes = currentOpt.awaitSizeProbes
   const hasImageProcessedHook = !!onImageProcessed
+  const onResizeHintEditingStateChange = typeof currentOpt.onResizeHintEditingStateChange === 'function'
+    ? currentOpt.onResizeHintEditingStateChange
+    : null
+  const hasResizeHintEditingStateHook = !!(resizeEnabled && onResizeHintEditingStateChange)
+  const tracksResizeHintState = !!(resizeEnabled && (keepPreviousDimensionsDuringResizeEdit || hasResizeHintEditingStateHook))
   const suppressLocalByMode = suppressErrorMode === 'local'
   const suppressRemoteByMode = suppressErrorMode === 'remote'
 
@@ -528,6 +552,19 @@ export const applyImageTransforms = async (root, contextOrOptions = {}, markdown
       finalSrc,
       displaySrc,
     }, suppressAllErrors)
+  }
+  const emitResizeHintEditingStateChange = (img, info) => {
+    if (!hasResizeHintEditingStateHook) return
+    safeInvokeResizeHintStateChange(onResizeHintEditingStateChange, img, info, suppressAllErrors)
+  }
+  const rememberResizeHintState = (img, state, sizeSrc) => {
+    if (!tracksResizeHintState || !img) return
+    resizeHintStateByImage.set(img, {
+      state,
+      sizeSrc: sizeSrc || '',
+      width: readPositiveIntAttr(img, 'width'),
+      height: readPositiveIntAttr(img, 'height'),
+    })
   }
   const applyProbeResultToImage = (img, imgName, resizeTitleForSize, loadSrc, finalSrc, displaySrc, probeResult) => {
     let status = probeResult?.status || 'failed'
@@ -690,8 +727,8 @@ export const applyImageTransforms = async (root, contextOrOptions = {}, markdown
       && !hasSpecialScheme(srcRaw)
 
     let src = srcBase
-    let finalSrc = srcRaw
-    let loadSrc = srcRaw
+    let finalSrc = ''
+    let loadSrc = ''
     let localDisplaySrc = ''
 
     if (resolveSrcEnabled) {
@@ -772,11 +809,44 @@ export const applyImageTransforms = async (root, contextOrOptions = {}, markdown
       setAttrIfChanged(img, 'src', displaySrc)
     }
 
+    const previousResizeHintStateInfo = tracksResizeHintState
+      ? (resizeHintStateByImage.get(img) || null)
+      : null
+    if (!resizeEnabled) {
+      resizeHintStateByImage.delete(img)
+    }
+
     const alt = img.alt
     if (alt) setAttrIfChanged(img, 'alt', alt)
     const titleAttr = getAttr(img, 'title')
+    const resizeHintInfo = resizeEnabled
+      ? classifyResizeHint(titleAttr)
+      : emptyResizeHintInfo
+    const resizeHintState = resizeHintInfo.state
+    const titleResizeValue = resizeEnabled && resizeHintState === 'valid'
+      ? resizeHintInfo.normalizedResizeValue
+      : ''
+    if (hasResizeHintEditingStateHook) {
+      const previousState = previousResizeHintStateInfo ? previousResizeHintStateInfo.state : null
+      if (previousState !== resizeHintState) {
+        const previousSize = previousResizeHintStateInfo
+          && previousResizeHintStateInfo.width > 0
+          && previousResizeHintStateInfo.height > 0
+          ? {
+            width: previousResizeHintStateInfo.width,
+            height: previousResizeHintStateInfo.height,
+          }
+          : null
+        emitResizeHintEditingStateChange(img, {
+          state: resizeHintState,
+          previousState,
+          title: titleAttr,
+          normalizedResizeValue: resizeHintState === 'valid' ? resizeHintInfo.normalizedResizeValue : '',
+          previousSize,
+        })
+      }
+    }
     const storedTitle = resizeDataAttr ? getAttr(img, resizeDataAttr) : ''
-    const titleResizeValue = resizeEnabled ? normalizeResizeValue(titleAttr) : ''
     let storedResizeValue = ''
     if (resizeEnabled && storedTitle) {
       const normalizedStored = String(storedTitle).trim().replace('％', '%').toLowerCase()
@@ -817,12 +887,30 @@ export const applyImageTransforms = async (root, contextOrOptions = {}, markdown
     }
 
     const sizeSrc = finalSrc || srcRaw || loadSrc
+    let shouldKeepPendingDimensions = false
+    if (
+      keepPreviousDimensionsDuringResizeEdit
+      && resizeHintState === 'pending'
+      && previousResizeHintStateInfo
+      && previousResizeHintStateInfo.sizeSrc === sizeSrc
+    ) {
+      const currentWidth = readPositiveIntAttr(img, 'width')
+      const currentHeight = readPositiveIntAttr(img, 'height')
+      shouldKeepPendingDimensions = currentWidth > 0 && currentHeight > 0
+    }
+    if (shouldKeepPendingDimensions) {
+      markSkippedImage(img, loadSrc, finalSrc, displaySrc)
+      rememberResizeHintState(img, resizeHintState, sizeSrc)
+      continue
+    }
     if (!sizeSrc || !imgExtReg.test(sizeSrc)) {
       markSkippedImage(img, loadSrc, finalSrc, displaySrc)
+      rememberResizeHintState(img, resizeHintState, sizeSrc)
       continue
     }
     if (!enableSizeProbe) {
       markSkippedImage(img, loadSrc, finalSrc, displaySrc)
+      rememberResizeHintState(img, resizeHintState, sizeSrc)
       continue
     }
 
@@ -831,6 +919,7 @@ export const applyImageTransforms = async (root, contextOrOptions = {}, markdown
       else if (status === 'timeout') summary.timeout += 1
       else if (status === 'failed') summary.failed += 1
       else summary.skipped += 1
+      rememberResizeHintState(img, resizeHintState, sizeSrc)
       return status
     })
     summary.pending += 1
