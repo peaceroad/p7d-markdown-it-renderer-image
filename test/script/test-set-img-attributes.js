@@ -59,7 +59,24 @@ class MockElement {
 
 // Lightweight document mock
 const createMockDocument = (images, metaTag = null) => {
-  return {
+  const head = {
+    nodeType: 1,
+    querySelector: (selector) => {
+      if (selector === 'meta[name="markdown-frontmatter"]') {
+        return metaTag
+      }
+      return null
+    },
+    querySelectorAll: (selector) => {
+      if (selector === 'meta[name="markdown-frontmatter"]' && metaTag) {
+        return [metaTag]
+      }
+      return []
+    }
+  }
+  const doc = {
+    nodeType: 9,
+    head,
     querySelectorAll: (selector) => {
       if (selector === 'img') {
         return images
@@ -71,6 +88,31 @@ const createMockDocument = (images, metaTag = null) => {
         return metaTag
       }
       return null
+    }
+  }
+  head.ownerDocument = doc
+  if (metaTag) metaTag.parentNode = head
+  images.forEach((img) => {
+    if (img && typeof img === 'object') img.ownerDocument = doc
+  })
+  return doc
+}
+const createMockContainerRoot = (images, ownerDocument) => {
+  return {
+    nodeType: 1,
+    ownerDocument,
+    querySelector: () => null,
+    querySelectorAll: (selector) => {
+      if (selector === 'img') {
+        return images
+      }
+      return []
+    },
+    getElementsByTagName: (tagName) => {
+      if (String(tagName).toLowerCase() === 'img') {
+        return images
+      }
+      return []
     }
   }
 }
@@ -282,6 +324,7 @@ await runTest(7, 'GetImageName function operation', async () => {
   
   const img = images[0]
   // Check if width and height are set
+  assert.strictEqual(img.getAttribute('data-img-scale-suffix'), '2x')
   assert.ok(img.getAttribute('width'))
   assert.ok(img.getAttribute('height'))
 })
@@ -446,12 +489,13 @@ await runTest(11, 'Resize title removal preserves data attribute', async () => {
   const img = images[0]
   assert.strictEqual(img.getAttribute('title'), '')
   assert.strictEqual(img.getAttribute('data-img-resize'), '50%')
+  assert.strictEqual(img.getAttribute('data-img-resize-origin'), '')
   assert.strictEqual(img.getAttribute('width'), '400')
   assert.strictEqual(img.getAttribute('height'), '300')
 })
 
-// Test 12: keep title clears data attribute
-await runTest(12, 'Keep title clears data attribute', async () => {
+// Test 12: keep title preserves effective resize metadata
+await runTest(12, 'Keep title preserves effective resize metadata', async () => {
   const images = [
     new MockElement('img', { src: 'cat.jpg', alt: 'cat', title: 'resize:50%', 'data-img-resize': '25%' })
   ]
@@ -463,7 +507,8 @@ await runTest(12, 'Keep title clears data attribute', async () => {
 
   const img = images[0]
   assert.strictEqual(img.getAttribute('title'), 'resize:50%')
-  assert.strictEqual(img.getAttribute('data-img-resize'), '')
+  assert.strictEqual(img.getAttribute('data-img-resize'), '50%')
+  assert.strictEqual(img.getAttribute('data-img-resize-origin'), '')
 })
 
 // Test 13: non-resize title clears data attribute
@@ -480,6 +525,7 @@ await runTest(13, 'Non-resize title clears data attribute', async () => {
   const img = images[0]
   assert.strictEqual(img.getAttribute('title'), 'A caption')
   assert.strictEqual(img.getAttribute('data-img-resize'), '')
+  assert.strictEqual(img.getAttribute('data-img-resize-origin'), '')
 })
 
 // Test 14: preserve query/hash when src is modified
@@ -677,6 +723,8 @@ imagescale: 50%
   const img = images[0]
   assert.strictEqual(img.getAttribute('width'), '400')
   assert.strictEqual(img.getAttribute('height'), '300')
+  assert.strictEqual(img.getAttribute('data-img-resize'), '50%')
+  assert.strictEqual(img.getAttribute('data-img-resize-origin'), 'imagescale')
 })
 
 // Test 28: noUpscale caps global scaling
@@ -706,6 +754,8 @@ imagescale: 200%
   const img = images[0]
   assert.strictEqual(img.getAttribute('width'), '800')
   assert.strictEqual(img.getAttribute('height'), '600')
+  assert.strictEqual(img.getAttribute('data-img-resize'), '100%')
+  assert.strictEqual(img.getAttribute('data-img-resize-origin'), 'imagescale')
 })
 
 // Test 30: title without resize keyword does not resize
@@ -746,6 +796,7 @@ await runTest(32, 'data-img-resize direct value', async () => {
   const img = images[0]
   assert.strictEqual(img.getAttribute('width'), '400')
   assert.strictEqual(img.getAttribute('height'), '300')
+  assert.strictEqual(img.getAttribute('data-img-resize-origin'), '')
 })
 
 // Test 33: previewMode markdown keeps markdown src and stores final src
@@ -1356,6 +1407,29 @@ await runTest(52, 'observeDebounceMs adds quiet-period debounce', async () => {
   }
 })
 
+// Test 52.5: duplicate probes are de-duplicated within the same apply run
+await runTest(52.5, 'in-flight probes are de-duplicated without persistent cache', async () => {
+  const images = [
+    new MockElement('img', { src: 'cat.jpg', alt: 'cat1' }),
+    new MockElement('img', { src: 'cat.jpg', alt: 'cat2' })
+  ]
+  const loadSrcs = []
+
+  await testSetImageAttributes(
+    images,
+    {
+      probeCacheMaxEntries: 0,
+    },
+    null,
+    null,
+    (value) => loadSrcs.push(value)
+  )
+
+  assert.strictEqual(loadSrcs.filter((value) => value === 'cat.jpg').length, 1)
+  assert.strictEqual(images[0].getAttribute('width'), '800')
+  assert.strictEqual(images[1].getAttribute('width'), '800')
+})
+
 // Test 53: probe cache reuses successful measurements across apply runs
 await runTest(53, 'probe cache reuses successful probes', async () => {
   const images = [
@@ -1441,6 +1515,118 @@ await runTest(54, 'probe cache reuses failed probe results', async () => {
     assert.strictEqual(summary1.failed, 1)
     assert.strictEqual(summary2.failed, 1)
     assert.strictEqual(loadCount, 1)
+  } finally {
+    global.Image = originalImage
+  }
+})
+
+// Test 54.5: timeout policy change should not reuse stale timeout cache
+await runTest(54.5, 'timeout changes bypass stale negative cache', async () => {
+  const images = [
+    new MockElement('img', { src: 'slow.jpg', alt: 'slow' })
+  ]
+  const root = createMockDocument(images)
+  const originalImage = global.Image
+  let loadCount = 0
+
+  global.Image = class SlowImage extends MockElement {
+    constructor() {
+      super('img')
+      this.complete = false
+      this.naturalWidth = 800
+      this.naturalHeight = 600
+      this.onload = null
+      this.onerror = null
+    }
+    setAttribute(name, value) {
+      super.setAttribute(name, value)
+      if (name === 'src') {
+        loadCount += 1
+        setTimeout(() => {
+          this.complete = true
+          if (this.onload) this.onload()
+        }, 30)
+      }
+    }
+  }
+
+  try {
+    const mod = await loadDomModule()
+    const timeoutContext = await mod.createContext('', {
+      suppressErrors: 'all',
+      probeCacheMaxEntries: 8,
+      probeNegativeCacheTtlMs: 3000,
+      sizeProbeTimeoutMs: 5,
+    }, root)
+    const relaxedContext = await mod.createContext('', {
+      suppressErrors: 'all',
+      probeCacheMaxEntries: 8,
+      probeNegativeCacheTtlMs: 3000,
+      sizeProbeTimeoutMs: 80,
+    }, root)
+
+    const summary1 = await mod.applyImageTransforms(root, timeoutContext)
+    const summary2 = await mod.applyImageTransforms(root, relaxedContext)
+
+    assert.strictEqual(summary1.timeout, 1)
+    assert.strictEqual(summary2.sized, 1)
+    assert.strictEqual(loadCount, 2)
+  } finally {
+    global.Image = originalImage
+  }
+})
+
+// Test 54.6: negative TTL changes should invalidate stale failed cache entries
+await runTest(54.6, 'negative TTL changes invalidate stale failed cache', async () => {
+  const images = [
+    new MockElement('img', { src: 'flaky.jpg', alt: 'flaky' })
+  ]
+  const root = createMockDocument(images)
+  const originalImage = global.Image
+  let loadCount = 0
+
+  global.Image = class FlakyImage extends MockElement {
+    constructor() {
+      super('img')
+      this.complete = false
+      this.naturalWidth = 800
+      this.naturalHeight = 600
+      this.onload = null
+      this.onerror = null
+    }
+    setAttribute(name, value) {
+      super.setAttribute(name, value)
+      if (name === 'src') {
+        loadCount += 1
+        if (loadCount === 1) {
+          if (this.onerror) setTimeout(() => this.onerror(), 0)
+          return
+        }
+        this.complete = true
+        if (this.onload) setTimeout(() => this.onload(), 0)
+      }
+    }
+  }
+
+  try {
+    const mod = await loadDomModule()
+    const cachedFailureContext = await mod.createContext('', {
+      suppressErrors: 'all',
+      probeCacheMaxEntries: 8,
+      probeNegativeCacheTtlMs: 3000,
+    }, root)
+    const noNegativeCacheContext = await mod.createContext('', {
+      suppressErrors: 'all',
+      probeCacheMaxEntries: 8,
+      probeNegativeCacheTtlMs: 0,
+    }, root)
+
+    const summary1 = await mod.applyImageTransforms(root, cachedFailureContext)
+    const summary2 = await mod.applyImageTransforms(root, noNegativeCacheContext)
+
+    assert.strictEqual(summary1.failed, 1)
+    assert.strictEqual(summary2.sized, 1)
+    assert.strictEqual(loadCount, 2)
   } finally {
     global.Image = originalImage
   }
@@ -2016,6 +2202,227 @@ await runTest(65, 'onResizeHintEditingStateChange reports transitions', async ()
       { state: 'empty', previousState: 'invalid', normalizedResizeValue: '' },
     ])
     assert.strictEqual(events[0].previousSize, null)
+  } finally {
+    global.document = originalDocument
+  }
+})
+
+// Test 66: CRLF frontmatter is parsed in DOM mode
+await runTest(66, 'CRLF frontmatter resolves image base', async () => {
+  const images = [
+    new MockElement('img', { src: 'cat.jpg', alt: 'cat' })
+  ]
+  const markdownWithCrLfYaml = '---\r\nurlimage: https://img.example.com/base/\r\n---\r\n\r\n# Test'
+
+  await testSetImageAttributes(images, {
+    enableSizeProbe: false,
+  }, markdownWithCrLfYaml)
+
+  assert.strictEqual(images[0].getAttribute('src'), 'https://img.example.com/base/cat.jpg')
+})
+
+// Test 67: readMeta uses ownerDocument when root is a container element
+await runTest(67, 'readMeta resolves meta from ownerDocument for container roots', async () => {
+  const images = [
+    new MockElement('img', { src: 'cat.jpg', alt: 'cat' })
+  ]
+  const metaTag = new MockElement('meta', {
+    name: 'markdown-frontmatter',
+    content: JSON.stringify({
+      _extensionSettings: {
+        rendererImage: {
+          lazyLoad: true,
+          asyncDecode: true,
+        }
+      }
+    })
+  })
+  const ownerDocument = createMockDocument(images, metaTag)
+  const root = createMockContainerRoot(images, ownerDocument)
+  const originalDocument = global.document
+
+  global.document = ownerDocument
+  try {
+    const mod = await loadDomModule()
+    const context = await mod.createContext('', {
+      readMeta: true,
+      enableSizeProbe: false,
+    }, root)
+    await mod.applyImageTransforms(root, context)
+
+    assert.strictEqual(images[0].getAttribute('loading'), 'lazy')
+    assert.strictEqual(images[0].getAttribute('decoding'), 'async')
+  } finally {
+    global.document = originalDocument
+  }
+})
+
+// Test 68: readMeta observer monitors meta scope for container roots
+await runTest(68, 'startObserver watches head meta for container roots', async () => {
+  const images = [
+    new MockElement('img', { src: 'cat.jpg', alt: 'cat' })
+  ]
+  const metaTag = new MockElement('meta', {
+    name: 'markdown-frontmatter',
+    content: '{}',
+  })
+  const ownerDocument = createMockDocument(images, metaTag)
+  const root = createMockContainerRoot(images, ownerDocument)
+  const originalMutationObserver = global.MutationObserver
+  let lastObserver = null
+
+  global.MutationObserver = class MockMutationObserver {
+    constructor(callback) {
+      this.callback = callback
+      this.observeCalls = []
+      lastObserver = this
+    }
+    observe(target, options) {
+      this.observeCalls.push({ target, options })
+    }
+    disconnect() {}
+  }
+
+  try {
+    const mod = await loadDomModule()
+    const controller = await mod.startObserver(root, {
+      readMeta: true,
+      enableSizeProbe: false,
+    })
+
+    assert.ok(lastObserver)
+    assert.strictEqual(lastObserver.observeCalls.length, 2)
+    assert.strictEqual(lastObserver.observeCalls[0].target, root)
+    assert.strictEqual(lastObserver.observeCalls[1].target, ownerDocument.head)
+    assert.ok(lastObserver.observeCalls[1].options.attributeFilter.includes('content'))
+    controller.disconnect()
+  } finally {
+    if (originalMutationObserver === undefined) {
+      delete global.MutationObserver
+    } else {
+      global.MutationObserver = originalMutationObserver
+    }
+  }
+})
+
+// Test 69: plugin-managed loading/decoding are removed when options are disabled
+await runTest(69, 'plugin-managed loading/decoding are rolled back on disable', async () => {
+  const images = [
+    new MockElement('img', { src: 'cat.jpg', alt: 'cat' })
+  ]
+  const originalDocument = global.document
+  global.document = createMockDocument(images)
+
+  try {
+    const mod = await loadDomModule()
+    await mod.applyImageTransforms(global.document, {
+      enableSizeProbe: false,
+      lazyLoad: true,
+      asyncDecode: true,
+    })
+    assert.strictEqual(images[0].getAttribute('loading'), 'lazy')
+    assert.strictEqual(images[0].getAttribute('decoding'), 'async')
+
+    await mod.applyImageTransforms(global.document, {
+      enableSizeProbe: false,
+      lazyLoad: false,
+      asyncDecode: false,
+    })
+    assert.strictEqual(images[0].getAttribute('loading'), '')
+    assert.strictEqual(images[0].getAttribute('decoding'), '')
+  } finally {
+    global.document = originalDocument
+  }
+})
+
+// Test 70: author-provided loading/decoding survive option disable
+await runTest(70, 'author loading/decoding are preserved on disable', async () => {
+  const images = [
+    new MockElement('img', { src: 'cat.jpg', alt: 'cat', loading: 'lazy', decoding: 'async' })
+  ]
+  const originalDocument = global.document
+  global.document = createMockDocument(images)
+
+  try {
+    const mod = await loadDomModule()
+    await mod.applyImageTransforms(global.document, {
+      enableSizeProbe: false,
+      lazyLoad: true,
+      asyncDecode: true,
+    })
+    await mod.applyImageTransforms(global.document, {
+      enableSizeProbe: false,
+      lazyLoad: false,
+      asyncDecode: false,
+    })
+    assert.strictEqual(images[0].getAttribute('loading'), 'lazy')
+    assert.strictEqual(images[0].getAttribute('decoding'), 'async')
+  } finally {
+    global.document = originalDocument
+  }
+})
+
+// Test 71: hidden resize titles are restored when auto-hide is disabled
+await runTest(71, 'auto-hidden resize title is restored when autoHideResizeTitle turns off', async () => {
+  const images = [
+    new MockElement('img', { src: 'cat.jpg', alt: 'cat', title: 'resize:50%' })
+  ]
+  const originalDocument = global.document
+  global.document = createMockDocument(images)
+
+  try {
+    const mod = await loadDomModule()
+    await mod.applyImageTransforms(global.document, {
+      enableSizeProbe: false,
+      resize: true,
+      autoHideResizeTitle: true,
+    })
+    assert.strictEqual(images[0].getAttribute('title'), '')
+    assert.strictEqual(images[0].getAttribute('data-img-resize'), '50%')
+    assert.strictEqual(images[0].getAttribute('data-img-resize-origin'), '')
+
+    await mod.applyImageTransforms(global.document, {
+      enableSizeProbe: false,
+      resize: true,
+      autoHideResizeTitle: false,
+    })
+    assert.strictEqual(images[0].getAttribute('title'), 'resize:50%')
+    assert.strictEqual(images[0].getAttribute('data-img-resize'), '50%')
+    assert.strictEqual(images[0].getAttribute('data-img-resize-origin'), '')
+  } finally {
+    global.document = originalDocument
+  }
+})
+
+// Test 72: readMeta resolves ownerDocument for iterable roots
+await runTest(72, 'readMeta resolves ownerDocument for iterable roots', async () => {
+  const images = [
+    new MockElement('img', { src: 'cat.jpg', alt: 'cat' })
+  ]
+  const metaTag = new MockElement('meta', {
+    name: 'markdown-frontmatter',
+    content: JSON.stringify({
+      _extensionSettings: {
+        rendererImage: {
+          lazyLoad: true,
+        }
+      }
+    })
+  })
+  const ownerDocument = createMockDocument(images, metaTag)
+  const originalDocument = global.document
+  global.document = createMockDocument([])
+
+  try {
+    const mod = await loadDomModule()
+    const root = [images[0]]
+    const context = await mod.createContext('', {
+      readMeta: true,
+      enableSizeProbe: false,
+    }, root)
+    await mod.applyImageTransforms(root, context)
+
+    assert.strictEqual(images[0].getAttribute('loading'), 'lazy')
   } finally {
     global.document = originalDocument
   }

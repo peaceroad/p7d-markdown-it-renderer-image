@@ -17,7 +17,7 @@ This test validates that the `set-img-attributes.js` script works correctly in a
 - Frontmatter parsing and option processing
 - Image src attribute transformation (lid/url/lmd)
 - Image size detection and attribute setting
-- Console logging for debugging and verification
+- Console logging for debugging and verification, including resize/suffix metadata
 
 ## How to Use
 
@@ -73,7 +73,12 @@ url: https://example.com/article/
     
     console.log('=== After DOM manipulation ===')
     images.forEach((img, i) => {
-      console.log(`Image${i+1}: final src="${img.src}", width="${img.width}", height="${img.height}"`)
+      console.log(
+        `Image${i+1}: final src="${img.src}", width="${img.width}", height="${img.height}", ` +
+        `resize="${img.getAttribute('data-img-resize')}", ` +
+        `resizeOrigin="${img.getAttribute('data-img-resize-origin')}", ` +
+        `scaleSuffix="${img.getAttribute('data-img-scale-suffix')}"`
+      )
     })
   } catch (error) {
     console.error('DOM manipulation error:', error)

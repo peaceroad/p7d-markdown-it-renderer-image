@@ -10,7 +10,9 @@ import {
   normalizeRelativePath,
   resolveImageBase,
   normalizeResizeValue,
-  normalizeExtensions,
+  buildImageExtensionRegExp,
+  getImageName,
+  getScaleSuffixValue,
   isHttpUrl,
   isProtocolRelativeUrl,
   isFileUrl,
@@ -28,6 +30,8 @@ const globalFailedImgLoads = new Set()
 const globalMissingMdPathWarnings = new Set()
 const emptyImgData = Object.freeze({})
 const globalLogSetMaxEntries = 2048
+const yamlFrontmatterFence = '---\n'
+const defaultScaleSuffixDataAttr = 'data-img-scale-suffix'
 
 const toAbsoluteRemote = (value) => (isProtocolRelativeUrl(value) ? `https:${value}` : value)
 const addToBoundedSet = (set, key, maxEntries = globalLogSetMaxEntries) => {
@@ -62,6 +66,21 @@ const hasOwnEnumerableKeys = (value) => {
     if (Object.prototype.hasOwnProperty.call(value, key)) return true
   }
   return false
+}
+const sourceStartsWithFrontmatter = (value) => {
+  return typeof value === 'string' && (value === '---' || value.startsWith(yamlFrontmatterFence))
+}
+const resolveRenderFrontmatter = (state, md) => {
+  const env = state?.env
+  if (env && Object.prototype.hasOwnProperty.call(env, 'frontmatter')) {
+    return env.frontmatter
+  }
+  // Fall back to md-scoped metadata only for documents that actually look like
+  // they carry YAML frontmatter in this render, to avoid cross-render leakage.
+  if (!sourceStartsWithFrontmatter(state?.src)) return null
+  if (hasOwnEnumerableKeys(md?.frontmatter)) return md.frontmatter
+  if (hasOwnEnumerableKeys(md?.meta)) return md.meta
+  return null
 }
 
 const resolveMdDir = (value) => {
@@ -163,10 +182,7 @@ const mditRendererImage = (md, option) => {
     opt.suppressErrors = 'none'
   }
 
-  const extPattern = normalizeExtensions(opt.checkImgExtensions).join('|')
-  const imgExtReg = extPattern
-    ? new RegExp('\\.(?:' + extPattern + ')(?=$|[?#])', 'i')
-    : /a^/
+  const imgExtReg = buildImageExtensionRegExp(opt.checkImgExtensions)
   const remoteSizeEnabled = !opt.disableRemoteSize
   const hasOptMdPath = !!opt.mdPath
   const resolvedOptMdDir = hasOptMdPath ? resolveMdDir(opt.mdPath) : ''
@@ -189,6 +205,8 @@ const mditRendererImage = (md, option) => {
   const resizeDataAttr = typeof opt.resizeDataAttr === 'string' && opt.resizeDataAttr.trim()
     ? opt.resizeDataAttr
     : ''
+  const resizeOriginDataAttr = resizeDataAttr ? `${resizeDataAttr}-origin` : ''
+  const scaleSuffixDataAttr = defaultScaleSuffixDataAttr
 
   const removeTokenAttr = (token, name) => {
     const index = token.attrIndex(name)
@@ -208,6 +226,7 @@ const mditRendererImage = (md, option) => {
     const {
       parsedFrontmatter,
       imageScale,
+      imageScaleResizeValue,
       shouldParseFrontmatter,
       mdDir,
       imageBase,
@@ -245,6 +264,12 @@ const mditRendererImage = (md, option) => {
     const isFile = isFileUrl(srcBase)
 
     if (isValidExt) {
+      const imgName = getImageName(srcBase)
+      const scaleSuffixValue = scaleSuffixEnabled ? getScaleSuffixValue(imgName) : ''
+      if (scaleSuffixDataAttr) {
+        if (scaleSuffixValue) token.attrSet(scaleSuffixDataAttr, scaleSuffixValue)
+        else removeTokenAttr(token, scaleSuffixDataAttr)
+      }
       let srcPath = ''
       if (isRemote) {
         if (remoteSizeEnabled) {
@@ -276,62 +301,86 @@ const mditRendererImage = (md, option) => {
         : emptyImgData
 
       if (imgData?.width !== undefined) {
-        const imgName = path.basename(srcBase, path.extname(srcBase))
         const { width, height } = setImgSize(imgName, imgData, scaleSuffixEnabled, resizeEnabled, titleRaw, imageScale, noUpscale)
         token.attrSet('width', width)
         token.attrSet('height', height)
       }
+    } else if (scaleSuffixDataAttr) {
+      removeTokenAttr(token, scaleSuffixDataAttr)
     }
 
     token.attrSet('src', finalSrc)
     token.attrSet('alt', token.content || '')
 
-    const resizeValue = resizeEnabled ? normalizeResizeValue(titleRaw) : ''
-    const removeTitle = autoHideResizeTitle && !!resizeValue
+    const titleResizeValue = resizeEnabled ? normalizeResizeValue(titleRaw) : ''
+    const effectiveResizeValue = titleResizeValue || imageScaleResizeValue || ''
+    const effectiveResizeOrigin = imageScaleResizeValue ? 'imagescale' : ''
+    const removeTitle = autoHideResizeTitle && !!titleResizeValue
     if (titleRaw && !removeTitle) {
       token.attrSet('title', titleRaw)
     } else if (removeTitle) {
-      if (resizeDataAttr && resizeValue) {
-        token.attrSet(resizeDataAttr, resizeValue)
-      }
       removeTokenAttr(token, 'title')
+    }
+    if (resizeDataAttr) {
+      if (effectiveResizeValue) token.attrSet(resizeDataAttr, effectiveResizeValue)
+      else removeTokenAttr(token, resizeDataAttr)
+    }
+    if (resizeOriginDataAttr) {
+      if (effectiveResizeOrigin) token.attrSet(resizeOriginDataAttr, effectiveResizeOrigin)
+      else removeTokenAttr(token, resizeOriginDataAttr)
     }
     if (isValidExt && asyncDecodeEnabled) token.attrSet('decoding', 'async')
     if (isValidExt && lazyLoadEnabled) token.attrSet('loading', 'lazy')
   }
 
   md.core.ruler.after('replacements', 'renderer_image', (state) => {
-    const renderState = {
-      imgDataCache: new Map(),
-      failedImgLoads: new Set(),
-      missingMdPathWarnings: new Set(),
-    }
-    const env = state?.env || {}
-    const mdDir = hasOptMdPath
-      ? resolvedOptMdDir
-      : (env?.mdPath ? resolveMdDir(env.mdPath) : '')
-    const frontmatter = env?.frontmatter || md.env?.frontmatter
-    const hasFrontmatter = hasOwnEnumerableKeys(frontmatter)
-    const shouldParseFrontmatter = hasFrontmatter || hasOptUrlImageBase
-    const parsedFrontmatter = shouldParseFrontmatter
-      ? (getFrontmatter(frontmatter || {}) || {})
-      : {}
-    const imageScale = shouldParseFrontmatter ? parsedFrontmatter.imageScale : null
-    const imageBase = shouldParseFrontmatter
-      ? resolveImageBase({
-        url: parsedFrontmatter.url,
-        urlimage: parsedFrontmatter.urlimage,
-        urlimagebase: parsedFrontmatter.urlimagebase || opt.urlImageBase,
-      })
-      : ''
-    const fmContext = {
-      shouldParseFrontmatter,
-      parsedFrontmatter,
-      imageScale,
-      imageBase,
-      mdDir,
-    }
     const tokens = state.tokens || []
+    let renderState = null
+    let fmContext = null
+
+    const ensureRenderState = () => {
+      if (renderState) return renderState
+      renderState = {
+        imgDataCache: new Map(),
+        failedImgLoads: new Set(),
+        missingMdPathWarnings: new Set(),
+      }
+      return renderState
+    }
+
+    const ensureFrontmatterContext = () => {
+      if (fmContext) return fmContext
+      const env = state?.env || {}
+      const mdDir = hasOptMdPath
+        ? resolvedOptMdDir
+        : (env?.mdPath ? resolveMdDir(env.mdPath) : '')
+      const frontmatter = resolveRenderFrontmatter(state, md)
+      const hasFrontmatter = hasOwnEnumerableKeys(frontmatter)
+      const shouldParseFrontmatter = hasFrontmatter || hasOptUrlImageBase
+      const parsedFrontmatter = shouldParseFrontmatter
+        ? (getFrontmatter(frontmatter || {}) || {})
+        : {}
+      const imageScale = shouldParseFrontmatter ? parsedFrontmatter.imageScale : null
+      const imageScaleResizeValue = shouldParseFrontmatter ? parsedFrontmatter.imageScaleResizeValue : ''
+      const imageBase = shouldParseFrontmatter
+        ? resolveImageBase({
+          url: parsedFrontmatter.url,
+          urlimage: parsedFrontmatter.urlimage,
+          urlimagebase: parsedFrontmatter.urlimagebase || opt.urlImageBase,
+        })
+        : ''
+
+      fmContext = {
+        shouldParseFrontmatter,
+        parsedFrontmatter,
+        imageScale,
+        imageScaleResizeValue,
+        imageBase,
+        mdDir,
+      }
+      return fmContext
+    }
+
     for (let tokenIndex = 0; tokenIndex < tokens.length; tokenIndex += 1) {
       const token = tokens[tokenIndex]
       if (token.type !== 'inline' || !token.children) continue
@@ -339,7 +388,7 @@ const mditRendererImage = (md, option) => {
       for (let childIndex = 0; childIndex < children.length; childIndex += 1) {
         const child = children[childIndex]
         if (child.type === 'image') {
-          processImageToken(child, renderState, fmContext)
+          processImageToken(child, ensureRenderState(), ensureFrontmatterContext())
         }
       }
     }

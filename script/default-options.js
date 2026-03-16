@@ -8,7 +8,7 @@ const defaultSharedOptions = Object.freeze({
   urlImageBase: '', // fallback base when frontmatter lacks urlimagebase
   outputUrlMode: 'absolute', // absolute | protocol-relative | path-only
   autoHideResizeTitle: true, // remove title when resize hint used
-  resizeDataAttr: 'data-img-resize', // store resize hint when title removed
+  resizeDataAttr: 'data-img-resize', // store effective resize metadata
   noUpscale: true, // internal: prevent final size from exceeding original pixels
   suppressErrors: 'none', // 'none' | 'all' | 'local' | 'remote'
 })

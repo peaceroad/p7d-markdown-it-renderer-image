@@ -4,7 +4,7 @@ import path from 'path'
 import mdit from 'markdown-it'
 import mditMeta from 'markdown-it-meta'
 import mditRendererImage from '../index.js'
-import { parseFrontmatter, normalizeRelativePath, getFrontmatter, classifyResizeHint } from '../script/img-util.js'
+import { parseFrontmatter, normalizeRelativePath, getFrontmatter, classifyResizeHint, setImgSize } from '../script/img-util.js'
 
 let __dirname = path.dirname(new URL(import.meta.url).pathname)
 const isWindows = (process.platform === 'win32')
@@ -151,6 +151,32 @@ pass = runTest(mdMeta, testData.noOption, pass)
 pass = runTest(mdMetaWithLidRelative, testData.withLidRelative, pass)
 
 console.log('===========================================================')
+console.log('test-yaml-frontmatter.js - md.meta fallback safety')
+try {
+  const rawMetaMarkdown = `---
+url: https://example.com/article/number
+---
+
+![](cat.jpg)`
+  const hMetaFallback = mdMeta.render(rawMetaMarkdown)
+  assert.strictEqual(hMetaFallback, '<p><img src="https://example.com/article/number/cat.jpg" alt="" width="400" height="300"></p>\n')
+
+  const hMetaNoLeak = mdMeta.render('![](cat.jpg)')
+  assert.strictEqual(hMetaNoLeak, '<p><img src="cat.jpg" alt="" width="400" height="300"></p>\n')
+
+  const hEnvPriority = mdMeta.render(rawMetaMarkdown, {
+    frontmatter: {
+      url: 'https://override.example.com/base/',
+    },
+  })
+  assert.strictEqual(hEnvPriority, '<p><img src="https://override.example.com/base/cat.jpg" alt="" width="400" height="300"></p>\n')
+} catch (e) {
+  pass = false
+  console.log('incorrect(md.meta fallback safety): ')
+  console.log(e.message)
+}
+
+console.log('===========================================================')
 console.log('test-yaml-frontmatter.js - urlimage/urlimagebase')
 try {
   const envUrlImage = {
@@ -224,7 +250,7 @@ try {
     },
   }
   const hImageScale = mdFrontmatter.render('![Alt](cat.jpg)', envImageScale)
-  assert.strictEqual(hImageScale, '<p><img src="cat.jpg" alt="Alt" width="200" height="150"></p>\n')
+  assert.strictEqual(hImageScale, '<p><img src="cat.jpg" alt="Alt" width="200" height="150" data-img-resize="50%" data-img-resize-origin="imagescale"></p>\n')
 
   const envImageScaleClamp = {
     frontmatter: {
@@ -232,7 +258,7 @@ try {
     },
   }
   const hImageScaleClamp = mdFrontmatter.render('![Alt](cat.jpg)', envImageScaleClamp)
-  assert.strictEqual(hImageScaleClamp, '<p><img src="cat.jpg" alt="Alt" width="400" height="300"></p>\n')
+  assert.strictEqual(hImageScaleClamp, '<p><img src="cat.jpg" alt="Alt" width="400" height="300" data-img-resize="100%" data-img-resize-origin="imagescale"></p>\n')
 } catch (e) {
   pass = false
   console.log('incorrect(urlimage/urlimagebase): ')
@@ -309,6 +335,14 @@ try {
   assert.deepStrictEqual(classifyResizeHint('hello'), {
     state: 'invalid',
     normalizedResizeValue: '',
+  })
+  assert.deepStrictEqual(setImgSize('cat@0x', { width: 800, height: 600 }, true, false, '', null, true), {
+    width: 800,
+    height: 600,
+  })
+  assert.deepStrictEqual(setImgSize('cat_0dpi', { width: 800, height: 600 }, true, false, '', null, true), {
+    width: 800,
+    height: 600,
   })
 } catch (e) {
   pass = false

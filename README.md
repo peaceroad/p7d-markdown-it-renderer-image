@@ -35,6 +35,13 @@ You can also pass `mdPath` at render time:
 md.render(mdText, { mdPath: mdFile })
 ```
 
+For frontmatter-driven URL resolution on Node, the runtime precedence is:
+
+1. `env.frontmatter` passed to `md.render(src, env)`
+2. `md.frontmatter` or `md.meta` only when the current markdown source begins with YAML frontmatter
+
+`md.env.frontmatter` is not part of the supported contract.
+
 ### Browser / Preview DOM
 
 ```html
@@ -101,7 +108,7 @@ await runInPreview({
 - `scaleSuffix` (default: `false`): Scale by filename suffix (`@2x`, `300dpi`, `300ppi`).
 - `resize` (default: `false`): Resize by title hint (for example `resize:50%`, `resize:200px`).
 - `autoHideResizeTitle` (default: `true`): Remove title when it is a resize hint.
-- `resizeDataAttr` (default: `'data-img-resize'`): Store normalized resize hint when title is removed (`''` disables).
+- `resizeDataAttr` (default: `'data-img-resize'`): Store normalized effective resize metadata (`title` resize or `imagescale`). When enabled, `${resizeDataAttr}-origin` is also emitted for `imagescale`-derived values (`''` disables both).
 - `lazyLoad` (default: `false`): Add `loading="lazy"`.
 - `asyncDecode` (default: `false`): Add `decoding="async"`.
 - `checkImgExtensions` (default: `'png,jpg,jpeg,gif,webp'`): Extensions eligible for sizing (query/hash ignored).
@@ -155,6 +162,11 @@ Additional DOM behavior:
 
 When `resolveSrc: true`, frontmatter keys are used (`url`, `urlimage`, `urlimagebase`, `lid`, `lmd`, `imagescale`).
 
+Node precedence:
+- Prefer `env.frontmatter` when provided.
+- Fall back to `md.frontmatter` / `md.meta` only for the current render when the markdown source itself starts with YAML frontmatter.
+- This avoids leaking metadata from a previous render on a reused `md` instance.
+
 Base URL selection order:
 
 1. Absolute `urlimage`
@@ -178,6 +190,11 @@ Order:
 4. Apply `imagescale` only when step 3 is not used
 5. Cap to original size (no upscaling)
 
+Metadata emitted to HTML:
+- `data-img-resize`: effective normalized resize value (`50%`, `320px`, ...)
+- `data-img-resize-origin`: emitted only for `imagescale`
+- `data-img-scale-suffix`: canonical filename suffix when `scaleSuffix` applies (`2x`, `300dpi`, `300ppi`)
+
 ## DOM Probe Source Workflow
 
 Probe URL (`loadSrc`) is decided in this order:
@@ -188,9 +205,9 @@ Probe URL (`loadSrc`) is decided in this order:
 
 Probe cache behavior:
 - `probeCacheMaxEntries > 0` enables cache.
-- Success results use `probeCacheTtlMs`.
-- Failure/timeout results use `probeNegativeCacheTtlMs`.
-- In-flight probe requests for same key are deduplicated.
+- Success results are cached by effective `loadSrc` and use `probeCacheTtlMs`.
+- Failure/timeout results are policy-aware: they use `probeNegativeCacheTtlMs` at read time and are keyed by `loadSrc` plus current `sizeProbeTimeoutMs`.
+- In-flight probe requests for the same `loadSrc` plus current `sizeProbeTimeoutMs` are deduplicated, even when persistent cache entries are disabled.
 
 ## Observer Workflow (DOM)
 

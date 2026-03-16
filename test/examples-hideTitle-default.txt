@@ -27,7 +27,7 @@
 [Markdown]
 ![Figure](cat_300dpi.jpg "A cat.")
 [HTML]
-<p><img src="cat_300dpi.jpg" alt="Figure" title="A cat." width="128" height="96"></p>
+<p><img src="cat_300dpi.jpg" alt="Figure" title="A cat." data-img-scale-suffix="300dpi" width="128" height="96"></p>
 
 [Markdown]
 ![Figure](cat.jpg "resize:80%")
@@ -52,7 +52,7 @@
 [Markdown]
 ![Figure](cat@2x.jpg "resize:50%")
 [HTML]
-<p><img src="cat@2x.jpg" alt="Figure" width="100" height="75" data-img-resize="50%"></p>
+<p><img src="cat@2x.jpg" alt="Figure" data-img-scale-suffix="2x" width="100" height="75" data-img-resize="50%"></p>
 
 [Markdown]
 ![Figure](cat.jpg "resize:320px")
@@ -62,7 +62,7 @@
 [Markdown]
 ![Figure](cat@2x.jpg "resize:320px")
 [HTML]
-<p><img src="cat@2x.jpg" alt="Figure" width="320" height="240" data-img-resize="320px"></p>
+<p><img src="cat@2x.jpg" alt="Figure" data-img-scale-suffix="2x" width="320" height="240" data-img-resize="320px"></p>
 
 [Markdown]
 ![Figure](dog.jpg)

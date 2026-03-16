@@ -4,7 +4,7 @@ const resizeValueReg = /^([0-9]+(?:\.[0-9]+)?)(%|px)$/i
 const resizePendingPrefixReg = /^(?:r|re|res|resi|resiz|resize|resized|resized t|resized to)$/i
 const resizePendingValueReg = /^(?:resize(?:d to)?)\s*[:：]?\s*(?:[0-9]+(?:\.[0-9]*)?\s*(?:%|％|p|px)?)?$/i
 const resizePendingJaValueReg = /^(?:リ|リサ|リサイ|リサイズ)\s*[:：]?\s*(?:[0-9]+(?:\.[0-9]*)?\s*(?:%|％|p|px)?)?$/i
-const yamlReg = /^--- *\n([\s\S]*?)\n---/
+const yamlReg = /^--- *\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/
 const percentEncodedReg = /%[0-9A-Fa-f]{2}/
 const encodedSlashReg = /%2f|%5c/i
 const httpUrlReg = /^https?:\/\//i
@@ -16,6 +16,7 @@ const windowsAbsolutePathReg = /^[A-Za-z]:\//
 const absoluteUrlReg = /^(?:[a-z][a-z0-9+.-]*:)?\/\//i
 const htmlFileReg = /\.(html|htm|xhtml)$/i
 const urlPathReg = /^([a-z]+:\/\/)(.*)/
+const neverMatchReg = /a^/
 const slashCharCode = 47
 const dotCharCode = 46
 const lowerRCharCode = 114
@@ -84,6 +85,12 @@ const normalizeExtensions = (value) => toText(value)
   .map((ext) => ext.trim().replace(/^\.+/, ''))
   .filter(Boolean)
   .map(escapeForRegExp)
+const buildImageExtensionRegExp = (value) => {
+  const extPattern = normalizeExtensions(value).join('|')
+  return extPattern
+    ? new RegExp(`\\.(?:${extPattern})(?=$|[?#])`, 'i')
+    : neverMatchReg
+}
 const isHttpUrl = (value) => httpUrlReg.test(toText(value))
 const isProtocolRelativeUrl = (value) => protocolRelativeReg.test(toText(value))
 const isFileUrl = (value) => fileUrlReg.test(toText(value))
@@ -225,7 +232,7 @@ const parseFrontmatter = (markdownCont) => {
   if (!yamlMatch) return {}
   const yamlContent = yamlMatch[1]
   const result = {}
-  const lines = yamlContent.split('\n')
+  const lines = yamlContent.split(/\r?\n/)
   for (const line of lines) {
     const trimmedLine = line.trim()
     if (!trimmedLine || trimmedLine.startsWith('#')) continue
@@ -309,6 +316,33 @@ const parseImageScale = (value) => {
   if (!Number.isFinite(numericValue) || numericValue <= 0) return null
   return Math.min(numericValue, 1)
 }
+const formatPercent = (value) => {
+  if (!Number.isFinite(value) || value <= 0) return ''
+  const rounded = Number(value.toFixed(6))
+  if (!Number.isFinite(rounded) || rounded <= 0) return ''
+  return `${String(rounded)}%`
+}
+const getImageScaleResizeValue = (value) => {
+  const scale = parseImageScale(value)
+  if (!Number.isFinite(scale) || scale <= 0) return ''
+  return formatPercent(scale * 100)
+}
+const getScaleSuffixInfo = (imgName) => {
+  const rs = toText(imgName).match(scaleSuffixReg)
+  if (!rs) return null
+  const scale = Number(rs[1])
+  const unit = toText(rs[2]).toLowerCase()
+  if (!Number.isFinite(scale) || scale <= 0 || !unit) return null
+  return {
+    scale,
+    unit,
+    value: `${String(scale)}${unit}`,
+  }
+}
+const getScaleSuffixValue = (imgName) => {
+  const info = getScaleSuffixInfo(imgName)
+  return info ? info.value : ''
+}
 
 const setImgSize = (imgName, imgData, scaleSuffix, resize, title, imageScale, noUpscale) => {
   if (!imgData) return {}
@@ -317,14 +351,14 @@ const setImgSize = (imgName, imgData, scaleSuffix, resize, title, imageScale, no
   let w = originalWidth
   let h = originalHeight
   if (scaleSuffix) {
-    const rs = imgName.match(scaleSuffixReg)
-    if (rs) {
-      const scale = +rs[1]
-      if (rs[2] === 'x') {
+    const suffixInfo = getScaleSuffixInfo(imgName)
+    if (suffixInfo) {
+      const { scale, unit } = suffixInfo
+      if (unit === 'x') {
         w = Math.round(w / scale)
         h = Math.round(h / scale)
       }
-      if (/[dp]pi/.test(rs[2])) {
+      if (/[dp]pi/.test(unit)) {
         w = Math.round(w * 96 / scale)
         h = Math.round(h * 96 / scale)
       }
@@ -396,7 +430,8 @@ const getFrontmatter = (frontmatter) => {
     if (!/\/$/.test(lmd)) lmd += '/'
   }
   const imageScale = parseImageScale(frontmatter.imagescale)
-  return { url, urlimage, urlimagebase, lid, imageDir, hasImageDir, lmd, imageScale }
+  const imageScaleResizeValue = getImageScaleResizeValue(frontmatter.imagescale)
+  return { url, urlimage, urlimagebase, lid, imageDir, hasImageDir, lmd, imageScale, imageScaleResizeValue }
 }
 
 const resolveImageBase = (frontmatter) => {
@@ -438,8 +473,11 @@ const applyOutputUrlMode = (value, mode) => {
 
 export {
   scaleSuffixReg, resizeReg, resizeValueReg,
+  buildImageExtensionRegExp,
   normalizeResizeValue,
   classifyResizeHint,
+  getImageScaleResizeValue,
+  getScaleSuffixValue,
   safeDecodeUri,
   stripQueryHash,
   normalizeExtensions,
