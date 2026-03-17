@@ -33,7 +33,46 @@ const globalLogSetMaxEntries = 2048
 const yamlFrontmatterFence = '---\n'
 const defaultScaleSuffixDataAttr = 'data-img-scale-suffix'
 
-const toAbsoluteRemote = (value) => (isProtocolRelativeUrl(value) ? `https:${value}` : value)
+const getRemoteFetchTargets = (value) => {
+  if (!isProtocolRelativeUrl(value)) return [value]
+  return [`https:${value}`, `http:${value}`]
+}
+const getRemoteFailureMessage = (src, failure) => {
+  const triedMultipleSchemes = isProtocolRelativeUrl(src)
+  if (!triedMultipleSchemes && failure?.type === 'status') {
+    return `[renderer-image] Can't load image (HTTP ${failure.status}): ${src}`
+  }
+  if (triedMultipleSchemes) {
+    return `[renderer-image] Can't load image: ${src} (tried https and http)`
+  }
+  return `[renderer-image] Can't load image: ${src}`
+}
+const getRemoteImgData = (src, timeout, remoteMaxBytes) => {
+  const targets = getRemoteFetchTargets(src)
+  let lastFailure = null
+  for (const target of targets) {
+    try {
+      const response = fetch(target, timeout ? { timeout } : undefined)
+      const responseStatus = typeof response?.status === 'number' ? response.status : 200
+      if (responseStatus < 200 || responseStatus >= 300) {
+        lastFailure = { type: 'status', status: responseStatus }
+        continue
+      }
+      const contentLength = Number(response?.headers?.get?.('content-length'))
+      if (Number.isFinite(contentLength) && remoteMaxBytes && contentLength > remoteMaxBytes) {
+        return { type: 'too-large', contentLength }
+      }
+      try {
+        return { type: 'success', data: imageSize(response.buffer()) }
+      } catch {
+        lastFailure = { type: 'decode' }
+      }
+    } catch {
+      lastFailure = { type: 'fetch' }
+    }
+  }
+  return lastFailure || { type: 'fetch' }
+}
 const addToBoundedSet = (set, key, maxEntries = globalLogSetMaxEntries) => {
   if (!set || set.has(key)) return
   set.add(key)
@@ -127,38 +166,36 @@ const getImgData = (src, isRemote, timeout, cache, cacheMax, failedSet, suppress
     const cached = cache.get(cacheKey)
     if (cached !== undefined) return cached
   }
-  try {
-    let data
-    if (isRemote) {
-      const response = fetch(src, timeout ? { timeout } : undefined)
-      const responseStatus = typeof response?.status === 'number' ? response.status : 200
-      if (responseStatus < 200 || responseStatus >= 300) {
-        const suppressByType = suppressRemoteErrors
-        if (shouldLogLoadError(cacheKey, failedSet, suppressLoadErrors, suppressByType)) {
-          console.error(`[renderer-image] Can't load image (HTTP ${responseStatus}): ${src}`)
-          markLoadErrorLogged(cacheKey, failedSet)
-        }
-        setCache(cache, cacheKey, emptyImgData, cacheMax)
-        return emptyImgData
+  if (isRemote) {
+    const remoteResult = getRemoteImgData(src, timeout, remoteMaxBytes)
+    if (remoteResult.type === 'too-large') {
+      const suppressByType = suppressRemoteErrors
+      if (shouldLogLoadError(cacheKey, failedSet, suppressLoadErrors, suppressByType)) {
+        console.error(`[renderer-image] Skip image (too large: ${remoteResult.contentLength} bytes): ${src}`)
+        markLoadErrorLogged(cacheKey, failedSet)
       }
-      const contentLength = Number(response.headers.get('content-length'))
-      if (Number.isFinite(contentLength) && remoteMaxBytes && contentLength > remoteMaxBytes) {
-        const suppressByType = suppressRemoteErrors
-        if (shouldLogLoadError(cacheKey, failedSet, suppressLoadErrors, suppressByType)) {
-          console.error(`[renderer-image] Skip image (too large: ${contentLength} bytes): ${src}`)
-          markLoadErrorLogged(cacheKey, failedSet)
-        }
-        setCache(cache, cacheKey, emptyImgData, cacheMax)
-        return emptyImgData
-      }
-      data = imageSize(response.buffer())
-    } else {
-      data = imageSize(src)
+      setCache(cache, cacheKey, emptyImgData, cacheMax)
+      return emptyImgData
     }
+    if (remoteResult.type !== 'success') {
+      const suppressByType = suppressRemoteErrors
+      if (shouldLogLoadError(cacheKey, failedSet, suppressLoadErrors, suppressByType)) {
+        console.error(getRemoteFailureMessage(src, remoteResult))
+        markLoadErrorLogged(cacheKey, failedSet)
+      }
+      setCache(cache, cacheKey, emptyImgData, cacheMax)
+      return emptyImgData
+    }
+    const data = remoteResult.data
+    setCache(cache, cacheKey, data, cacheMax)
+    return data
+  }
+  try {
+    const data = imageSize(src)
     setCache(cache, cacheKey, data, cacheMax)
     return data
   } catch {
-    const suppressByType = isRemote ? suppressRemoteErrors : suppressLocalErrors
+    const suppressByType = suppressLocalErrors
     if (shouldLogLoadError(cacheKey, failedSet, suppressLoadErrors, suppressByType)) {
       console.error("[renderer-image] Can't load image: " + src)
       markLoadErrorLogged(cacheKey, failedSet)
@@ -273,7 +310,7 @@ const mditRendererImage = (md, option) => {
       let srcPath = ''
       if (isRemote) {
         if (remoteSizeEnabled) {
-          srcPath = toAbsoluteRemote(srcRaw)
+          srcPath = srcRaw
         }
       } else {
         srcPath = getLocalImgSrc(srcBase, mdDir)

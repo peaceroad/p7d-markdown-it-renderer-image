@@ -66,6 +66,7 @@ const probeCacheByOwner = new WeakMap()
 const resizeHintStateByImage = new WeakMap()
 const managedSupplementalAttrsByImage = new WeakMap()
 const autoHiddenResizeTitleByImage = new WeakMap()
+const managedDisplaySrcByImage = new WeakMap()
 const createSummary = (total = 0) => ({
   total,
   processed: 0,
@@ -345,6 +346,20 @@ const rendererObjectOptionKeys = Object.freeze([
 const rendererArrayOptionKeys = Object.freeze([
   'observeAttributeFilter',
 ])
+const isBooleanOption = (value) => typeof value === 'boolean'
+const isStringOption = (value) => typeof value === 'string'
+const isNumberOption = (value) => Number.isFinite(value)
+const isFunctionOption = (value) => typeof value === 'function'
+const isObjectOption = (value) => value && typeof value === 'object' && !Array.isArray(value)
+const isArrayOption = (value) => Array.isArray(value)
+const rendererOptionSpecs = Object.freeze([
+  [rendererBooleanOptionKeys, isBooleanOption],
+  [rendererStringOptionKeys, isStringOption],
+  [rendererNumberOptionKeys, isNumberOption],
+  [rendererFunctionOptionKeys, isFunctionOption],
+  [rendererObjectOptionKeys, isObjectOption],
+  [rendererArrayOptionKeys, isArrayOption],
+])
 const applyTypedRendererOptions = (targetOpt, rendererSettings, optionOverrides, keys, isValidValue) => {
   for (const key of keys) {
     if (optionOverrides.has(key)) continue
@@ -354,18 +369,9 @@ const applyTypedRendererOptions = (targetOpt, rendererSettings, optionOverrides,
 }
 const applyRendererOptions = (targetOpt, rendererSettings, optionOverrides) => {
   if (!rendererSettings || typeof rendererSettings !== 'object') return
-  applyTypedRendererOptions(targetOpt, rendererSettings, optionOverrides, rendererBooleanOptionKeys, (value) => typeof value === 'boolean')
-  applyTypedRendererOptions(targetOpt, rendererSettings, optionOverrides, rendererStringOptionKeys, (value) => typeof value === 'string')
-  applyTypedRendererOptions(targetOpt, rendererSettings, optionOverrides, rendererNumberOptionKeys, (value) => Number.isFinite(value))
-  applyTypedRendererOptions(targetOpt, rendererSettings, optionOverrides, rendererFunctionOptionKeys, (value) => typeof value === 'function')
-  applyTypedRendererOptions(
-    targetOpt,
-    rendererSettings,
-    optionOverrides,
-    rendererObjectOptionKeys,
-    (value) => value && typeof value === 'object' && !Array.isArray(value)
-  )
-  applyTypedRendererOptions(targetOpt, rendererSettings, optionOverrides, rendererArrayOptionKeys, (value) => Array.isArray(value))
+  for (const [keys, isValidValue] of rendererOptionSpecs) {
+    applyTypedRendererOptions(targetOpt, rendererSettings, optionOverrides, keys, isValidValue)
+  }
 }
 
 export const createContext = async (markdownCont = '', option = {}, root = null) => {
@@ -574,7 +580,7 @@ export const applyImageTransforms = async (root, contextOrOptions = {}, markdown
   const resolveSrcEnabled = currentOpt.resolveSrc
   const outputUrlMode = currentOpt.outputUrlMode
   const previewMode = currentOpt.previewMode
-  const usesStoredOriginalSrc = previewMode !== 'output'
+  const usesStoredOriginalSrc = previewMode !== 'output' && currentOpt.setDomSrc
   const loadSrcStrategy = currentOpt.loadSrcStrategy
   const hasLoadSrcPrefixMap = loadSrcPrefixEntries.length > 0
   const setDomSrc = currentOpt.setDomSrc
@@ -766,9 +772,11 @@ export const applyImageTransforms = async (root, contextOrOptions = {}, markdown
     }
     summary.processed += 1
 
+    const currentSrcAttr = getAttr(img, 'src')
     const storedOriginalSrc = usesStoredOriginalSrc ? getAttr(img, originalSrcAttr) : ''
-    const useStored = usesStoredOriginalSrc && storedOriginalSrc
-    const srcRaw = useStored ? storedOriginalSrc : getAttr(img, 'src')
+    const managedDisplaySrc = usesStoredOriginalSrc ? (managedDisplaySrcByImage.get(img) || '') : ''
+    const useStored = usesStoredOriginalSrc && storedOriginalSrc && managedDisplaySrc === currentSrcAttr
+    const srcRaw = useStored ? storedOriginalSrc : currentSrcAttr
     const srcBase = stripQueryHash(srcRaw)
     const srcSuffix = srcRaw.slice(srcBase.length)
     const isLocalSrc = !isHttpUrl(srcRaw)
@@ -848,15 +856,20 @@ export const applyImageTransforms = async (root, contextOrOptions = {}, markdown
     }
 
     if (previewMode !== 'output') {
-      if (!storedOriginalSrc && srcRaw) setAttrIfChanged(img, originalSrcAttr, srcRaw)
+      if (srcRaw) setAttrIfChanged(img, originalSrcAttr, srcRaw)
       if (outputSrcAttr && finalSrc) setAttrIfChanged(img, outputSrcAttr, finalSrc)
     } else {
       removeAttrIfPresent(img, originalSrcAttr)
       if (outputSrcAttr) removeAttrIfPresent(img, outputSrcAttr)
+      managedDisplaySrcByImage.delete(img)
     }
 
     if (setDomSrc) {
       setAttrIfChanged(img, 'src', displaySrc)
+      if (previewMode !== 'output') managedDisplaySrcByImage.set(img, displaySrc)
+      else managedDisplaySrcByImage.delete(img)
+    } else {
+      managedDisplaySrcByImage.delete(img)
     }
 
     const previousResizeHintStateInfo = tracksResizeHintState

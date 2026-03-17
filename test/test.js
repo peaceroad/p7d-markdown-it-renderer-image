@@ -2,6 +2,7 @@ import assert from 'assert'
 import fs from 'fs'
 import path from 'path'
 import mdit from 'markdown-it'
+import { Worker } from 'worker_threads'
 import mditRendererImage, { runInPreview } from '../index.js'
 
 let __dirname = path.dirname(new URL(import.meta.url).pathname)
@@ -66,6 +67,89 @@ const htmlMatches = (actual, expected) => {
   if (actual === expected) return true
   if (!isRemoteImgHtml(expected)) return false
   return stripSizeAttrs(actual) === stripSizeAttrs(expected)
+}
+
+const startProtocolRelativeImageServer = async (imagePath) => {
+  const serverScript = [
+    "const { parentPort, workerData } = require('worker_threads')",
+    "const http = require('http')",
+    "const fs = require('fs')",
+    "const imagePath = workerData.imagePath",
+    "const server = http.createServer((req, res) => {",
+    "  if (req.url !== '/cat.jpg') {",
+    "    res.writeHead(404)",
+    "    res.end('not found')",
+    "    return",
+    "  }",
+    "  const stat = fs.statSync(imagePath)",
+    "  res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Content-Length': stat.size })",
+    "  fs.createReadStream(imagePath).pipe(res)",
+    "})",
+    "server.listen(0, '127.0.0.1', () => {",
+    "  const address = server.address()",
+    "  parentPort.postMessage({ type: 'listening', port: address.port })",
+    "})",
+    "parentPort.on('message', (message) => {",
+    "  if (message !== 'stop') return",
+    "  server.close(() => process.exit(0))",
+    "})",
+  ].join(';')
+
+  const worker = new Worker(serverScript, {
+    eval: true,
+    workerData: { imagePath },
+  })
+  let stopped = false
+  worker.once('exit', () => {
+    stopped = true
+  })
+
+  const port = await new Promise((resolve, reject) => {
+    let settled = false
+    const cleanup = () => {
+      worker.off('message', onMessage)
+      worker.off('error', onError)
+      worker.off('exit', onExit)
+    }
+    const onMessage = (message) => {
+      if (!message || message.type !== 'listening') return
+      settled = true
+      cleanup()
+      resolve(Number(message.port))
+    }
+    const onError = (error) => {
+      settled = true
+      cleanup()
+      reject(error)
+    }
+    const onExit = (code) => {
+      if (settled) return
+      cleanup()
+      reject(new Error(`image server exited before reporting a port (code: ${code})`))
+    }
+    worker.on('message', onMessage)
+    worker.on('error', onError)
+    worker.on('exit', onExit)
+  })
+
+  const stop = async () => {
+    if (stopped) return
+    await new Promise((resolve) => {
+      let resolved = false
+      const finish = () => {
+        if (resolved) return
+        resolved = true
+        resolve()
+      }
+      worker.once('exit', () => finish())
+      worker.postMessage('stop')
+      setTimeout(() => {
+        worker.terminate().finally(() => finish())
+      }, 1000)
+    })
+  }
+
+  return { worker, port, stop }
 }
 
 console.log('===========================================================')
@@ -181,4 +265,39 @@ while(n < msHide.length) {
 }
 
 if (pass) console.log('\nAll tests passed (including autoHideResizeTitle default)')
+
+console.log('===========================================================')
+console.log('test.js - protocol-relative remote fallback')
+let protocolRelativeServer = null
+const originalConsoleError = console.error
+const protocolRelativeErrors = []
+try {
+  console.error = (...args) => {
+    protocolRelativeErrors.push(args.map((value) => String(value)).join(' '))
+  }
+  protocolRelativeServer = await startProtocolRelativeImageServer(path.join(__dirname, 'cat.jpg'))
+  const mdProtocolRelativeRemote = mdit().use(mditRendererImage, {
+    ...commonOpt,
+    mdPath: mdPat,
+    remoteTimeout: 500,
+  })
+  const hProtocolRelativeRemote = mdProtocolRelativeRemote.render(`![Figure](//127.0.0.1:${protocolRelativeServer.port}/cat.jpg)`)
+  assert.match(hProtocolRelativeRemote, /src="\/\/127\.0\.0\.1:\d+\/cat\.jpg"/)
+  if (/width="400"/.test(hProtocolRelativeRemote) && /height="300"/.test(hProtocolRelativeRemote)) {
+    // Preferred path: HTTP fallback reaches the local server and measures dimensions.
+  } else {
+    assert.ok(
+      protocolRelativeErrors.some((message) => message.includes(`//127.0.0.1:${protocolRelativeServer.port}/cat.jpg (tried https and http)`)),
+      `Expected https/http fallback log for protocol-relative URL. Logs: ${protocolRelativeErrors.join(' | ')}`
+    )
+  }
+} catch (e) {
+  pass = false
+  console.log('incorrect(protocol-relative remote fallback): ')
+  console.log(e.message)
+} finally {
+  console.error = originalConsoleError
+  await protocolRelativeServer?.stop()
+}
+
 if (!pass) process.exitCode = 1

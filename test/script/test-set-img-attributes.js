@@ -876,7 +876,7 @@ urlimage: https://cdn.example.com/assets/
 
   const result = await testSetImageAttributes(
     images,
-    { setDomSrc: false, resize: true },
+    { setDomSrc: false, resize: true, previewMode: 'markdown' },
     markdownWithYaml,
     null,
     null,
@@ -885,8 +885,47 @@ urlimage: https://cdn.example.com/assets/
 
   const img = result.images[0]
   assert.strictEqual(img.getAttribute('src'), 'cat.jpg')
+  assert.strictEqual(img.getAttribute('data-img-src-raw'), 'cat.jpg')
+  assert.strictEqual(img.getAttribute('data-img-output-src'), 'https://cdn.example.com/assets/cat.jpg')
   assert.ok(img.getAttribute('width'))
   assert.ok(img.getAttribute('height'))
+})
+
+// Test 36.5: reused IMG nodes should track externally updated src values
+await runTest(36.5, 'previewMode local follows src edits on reused IMG nodes', async () => {
+  const images = [
+    new MockElement('img', { src: 'cats/cat.jpg', alt: 'cat' })
+  ]
+  const markdownWithYaml = `---
+lmd: C:\\Users\\me\\Pictures
+url: https://example.com/page
+urlimage: https://cdn.example.com/assets/
+---`
+  const originalDocument = global.document
+  const originalLocation = global.location
+  global.document = createMockDocument(images)
+  global.location = { protocol: 'file:' }
+
+  try {
+    const mod = await loadDomModule()
+    const context = await mod.createContext(markdownWithYaml, { previewMode: 'local' }, global.document)
+    await mod.applyImageTransforms(global.document, context)
+
+    const img = images[0]
+    assert.ok(img.getAttribute('src').endsWith('/cats/cat.jpg'))
+    assert.strictEqual(img.getAttribute('data-img-src-raw'), 'cats/cat.jpg')
+
+    img.setAttribute('src', 'cats/updated.jpg')
+    await mod.applyImageTransforms(global.document, context)
+
+    assert.ok(img.getAttribute('src').endsWith('/cats/updated.jpg'))
+    assert.strictEqual(img.getAttribute('data-img-src-raw'), 'cats/updated.jpg')
+    assert.strictEqual(img.getAttribute('data-img-output-src'), 'https://cdn.example.com/assets/cats/updated.jpg')
+  } finally {
+    global.document = originalDocument
+    if (originalLocation === undefined) delete global.location
+    else global.location = originalLocation
+  }
 })
 
 // Test 37: awaitSizeProbes false leaves pending tasks
