@@ -242,6 +242,7 @@ Recommendations for extension hosts (for example VS Code):
 
 Important limit:
 - `remoteMaxBytes` is effective only when `content-length` is present.
+- Protocol-relative remote images (`//cdn.example.com/cat.jpg`) are measured with `https:` first and then `http:` if HTTPS fails. The emitted `src` itself is not rewritten by this fallback.
 
 ## Testing
 

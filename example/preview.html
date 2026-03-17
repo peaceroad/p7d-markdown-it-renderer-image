@@ -2,182 +2,438 @@
 <html lang="en">
   <head>
     <meta charset="utf-8">
-    <title>renderer-image preview</title>
+    <title>renderer-image file samples</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
+      :root {
+        color-scheme: light;
+        --bg: #f5efe4;
+        --surface: rgba(255, 252, 246, 0.96);
+        --surface-soft: rgba(255, 248, 238, 0.8);
+        --line: #d8ccba;
+        --line-strong: #c7b59b;
+        --ink: #1d1915;
+        --muted: #6f6257;
+        --accent: #1b6a58;
+        --accent-soft: rgba(27, 106, 88, 0.08);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
       body {
-        font-family: Arial, sans-serif;
-        margin: 24px;
-        color: #1a1a1a;
+        margin: 0;
+        background:
+          radial-gradient(circle at top left, rgba(27, 106, 88, 0.14), transparent 25%),
+          linear-gradient(180deg, #fbf7ef 0%, var(--bg) 100%);
+        color: var(--ink);
+        font: 14px/1.6 "Segoe UI Variable Text", "Segoe UI", "Hiragino Sans", Meiryo, sans-serif;
       }
-      h1 {
-        font-size: 20px;
-        margin: 0 0 8px;
+
+      .page {
+        max-width: 1440px;
+        margin: 0 auto;
+        padding: 28px 20px 48px;
       }
-      p.note {
-        margin: 0 0 16px;
-        color: #555;
-      }
-      .grid {
+
+      .hero {
         display: grid;
-        grid-template-columns: minmax(240px, 1fr) minmax(240px, 1fr);
-        gap: 16px;
+        gap: 8px;
+        margin-bottom: 24px;
       }
-      .panel {
-        border: 1px solid #ddd;
-        padding: 12px;
-        border-radius: 6px;
-        background: #fafafa;
-        min-height: 120px;
+
+      .hero h1 {
+        margin: 0;
+        font-size: clamp(26px, 4vw, 40px);
+        font-weight: 660;
+        letter-spacing: -0.045em;
+        line-height: 0.98;
       }
-      pre.panel {
+
+      .hero-lead {
+        max-width: 760px;
+        margin: 0;
+        padding: 8px 10px;
+        border-left: 2px solid rgba(27, 106, 88, 0.24);
+        background: rgba(255, 252, 246, 0.3);
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .samples {
+        display: grid;
+        gap: 34px;
+      }
+
+      .sample {
+        padding-top: 24px;
+        border-top: 1px solid rgba(199, 181, 155, 0.78);
+      }
+
+      .sample:first-child {
+        padding-top: 0;
+        border-top: 0;
+      }
+
+      .sample-head {
+        display: grid;
+        gap: 7px;
+        margin-bottom: 16px;
+      }
+
+      .sample-index {
+        color: var(--accent);
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .sample-head h2 {
+        margin: 0;
+        font-size: 22px;
+        font-weight: 650;
+        letter-spacing: -0.04em;
+        line-height: 1.08;
+      }
+
+      .sample-head p {
+        max-width: 780px;
+        margin: 0;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .sample-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        min-height: 28px;
+        padding: 0 11px;
+        border: 1px solid rgba(199, 181, 155, 0.82);
+        border-radius: 999px;
+        background: rgba(255, 250, 243, 0.72);
+        color: var(--muted);
+        font-size: 11px;
+      }
+
+      .sample-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr);
+        gap: 18px;
+      }
+
+      .pane {
+        display: grid;
+        gap: 10px;
+        min-width: 0;
+      }
+
+      .pane-head h3 {
+        margin: 0;
+        font-size: 16px;
+        font-weight: 650;
+        letter-spacing: -0.02em;
+      }
+
+      .pane-head p {
+        margin: 2px 0 0;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .code-area,
+      .preview-stage {
+        min-height: 420px;
+        padding: 15px 16px;
+        border: 1px solid rgba(216, 204, 186, 0.92);
+        border-radius: 16px;
+        background:
+          linear-gradient(180deg, rgba(27, 106, 88, 0.03), rgba(27, 106, 88, 0)),
+          var(--surface);
+      }
+
+      .code-area {
+        width: 100%;
+        resize: vertical;
+        overflow: auto;
+        margin: 0;
         white-space: pre-wrap;
         word-break: break-word;
-        font-size: 12px;
+        font: 13px/1.65 ui-monospace, "Cascadia Code", Consolas, monospace;
+        color: var(--ink);
       }
-      textarea.panel {
-        width: 100%;
-        box-sizing: border-box;
-        resize: vertical;
-        font-family: Consolas, Menlo, monospace;
-        font-size: 12px;
+
+      .preview-stage {
+        overflow: auto;
       }
-      img {
+
+      .preview-stage > :first-child {
+        margin-top: 0;
+      }
+
+      .preview-stage > :last-child {
+        margin-bottom: 0;
+      }
+
+      .preview-stage img {
+        display: block;
         max-width: 100%;
         height: auto;
-        display: block;
+        margin: 14px 0;
+      }
+
+      .code-area[readonly] {
+        background:
+          linear-gradient(180deg, rgba(27, 106, 88, 0.02), rgba(27, 106, 88, 0)),
+          rgba(255, 253, 249, 0.96);
+      }
+
+      .error-text {
+        color: #a2322d;
+      }
+
+      @media (max-width: 1180px) {
+        .sample-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .code-area,
+        .preview-stage {
+          min-height: 280px;
+        }
       }
     </style>
+    <script src="../node_modules/markdown-it/dist/markdown-it.min.js"></script>
+    <script src="./preview-bundle.js"></script>
   </head>
   <body>
-    <h1>Markdown -> Preview (local src) -> Output HTML (final src)</h1>
-    <p class="note">
-      This page uses embedded Markdown, renders it, and shows local preview vs final HTML.
-      Open via file:// to allow local previews. If scripts or images do not load,
-      use a local server or allow file access in your browser.
-    </p>
-    <div class="grid">
-      <section>
-        <h2>Markdown (source)</h2>
-        <textarea id="markdown" class="panel" rows="12"></textarea>
-      </section>
-      <section>
-        <h2>Rendered HTML (source)</h2>
-        <pre id="rendered" class="panel"></pre>
-      </section>
-      <section>
-        <h2>Preview (local src)</h2>
-        <div id="preview" class="panel"></div>
-      </section>
-      <section>
-        <h2>Output HTML (final src)</h2>
-        <pre id="final" class="panel"></pre>
-      </section>
-    </div>
-    <script id="markdown-source" type="text/markdown">
----
+    <main class="page">
+      <header class="hero">
+        <h1>renderer-image file:// samples</h1>
+        <p class="hero-lead">
+          In this page, <code>lmd: {{LMD}}</code> is only a display placeholder. At render time it
+          resolves to the directory that contains <code>preview.html</code>. In a real markdown
+          file, write an actual path such as <code>lmd: file:///.../example/</code>.
+        </p>
+      </header>
+
+      <section id="samples" class="samples" aria-label="Example samples"></section>
+    </main>
+
+    <script>
+      (() => {
+        const samples = [
+          {
+            index: 'Sample 01',
+            title: 'Local Preview + Remote Output',
+            summary:
+              'Preview uses local lmd so cat.jpg is visible on file://, while output still rewrites to the configured CDN URL.',
+            chips: ['previewMode local', 'size probe on', 'local lmd resolved at render'],
+            markdown: `---
 lmd: {{LMD}}
 url: https://example.com/page
 urlimage: https://cdn.example.com/assets/
 ---
 
-![Cat](cat.jpg "resize:50%")
-![Cat (no resize)](cat.jpg)
-    </script>
-    <script src="../node_modules/markdown-it/dist/markdown-it.min.js"></script>
-    <script type="module">
-      const markdownEl = document.getElementById('markdown')
-      const renderedEl = document.getElementById('rendered')
-      const previewRoot = document.getElementById('preview')
-      const finalEl = document.getElementById('final')
+![Cat](cat.jpg)
+`,
+            option: {
+              previewMode: 'local',
+              resize: true,
+              enableSizeProbe: true,
+            },
+            previewNote: 'Rendered markdown after DOM transforms.',
+            outputNote: 'Expected src points to https://cdn.example.com/assets/cat.jpg with width and height.',
+          },
+          {
+            index: 'Sample 02',
+            title: 'Resize Hint Using The Local File',
+            summary:
+              'Forces size probing so resize:50% can size the local image on file:// while output keeps the rewritten remote URL.',
+            chips: ['previewMode local', 'size probe on', 'resize 50%'],
+            markdown: `---
+lmd: {{LMD}}
+url: https://example.com/page
+urlimage: https://cdn.example.com/assets/
+---
 
-      const sourceEl = document.getElementById('markdown-source')
+![Cat 50%](cat.jpg "resize:50%")
 
-      const md = window.markdownit ? window.markdownit() : null
-      const renderMarkdown = (markdown) => {
-        if (md) return md.render(markdown)
-        const body = markdown.replace(/^---[\\s\\S]*?---\\s*/m, '')
-        const lines = body.split('\\n').filter(Boolean)
-        return lines.map((line) => {
-          const imgMatch = line.match(/!\\[([^\\]]*)\\]\\(([^)\\s]+)(?:\\s+\\"([^\\"]*)\\")?\\)/)
-          if (imgMatch) {
-            const alt = imgMatch[1]
-            const src = imgMatch[2]
-            const title = imgMatch[3]
-            const titleAttr = title ? \` title="\${title}"\` : ''
-            return \`<p><img src="\${src}" alt="\${alt}"\${titleAttr}></p>\`
-          }
-          return \`<p>\${line}</p>\`
-        }).join('\\n')
-      }
+![Cat full size](cat.jpg)
+`,
+            option: {
+              previewMode: 'local',
+              resize: true,
+              enableSizeProbe: true,
+            },
+            previewNote: 'The first image should render smaller than the second one.',
+            outputNote: 'Expected output includes rewritten src plus resize-related attributes.',
+          },
+        ]
 
-      const lmd = new URL('./', window.location.href).href
-      let createContext = null
-      let applyImageTransforms = null
-      try {
-        const mod = await import('../script/set-img-attributes.js')
-        createContext = mod.createContext
-        applyImageTransforms = mod.applyImageTransforms
-      } catch (error) {
-        finalEl.textContent = 'Module load error: ' + error.message
-      }
+        const root = document.getElementById('samples')
+        const api = window.RendererImageDom
+        const markdownFactory = window.markdownit
+        const markdown = markdownFactory
+          ? markdownFactory({ html: false, linkify: false, typographer: false })
+          : null
+        const yamlFrontmatterReg = /^---[ \t]*\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/
 
-      let renderToken = 0
-      const renderAll = async () => {
-        const token = ++renderToken
-        const rawMarkdown = sourceEl ? sourceEl.textContent : ''
-        const markdownCont = rawMarkdown.replace(/\\{\\{LMD\\}\\}/g, lmd)
-        markdownEl.value = markdownCont
+        const escapeHtml = (value) => String(value ?? '')
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#39;')
 
-        const renderedHtml = renderMarkdown(markdownCont)
-        renderedEl.textContent = renderedHtml.trim()
-        previewRoot.innerHTML = renderedHtml
+        const getHarnessLmd = () => new URL('./', window.location.href).href
 
-        if (createContext && applyImageTransforms) {
-          const context = await createContext(markdownCont, {
-            resize: true,
-            previewMode: 'local',
-          }, previewRoot)
-          await applyImageTransforms(previewRoot, context, markdownCont)
+        const renderMarkdown = (markdownCont) => {
+          if (!markdown) throw new Error('markdown-it did not load.')
+          return markdown.render(String(markdownCont || '').replace(yamlFrontmatterReg, ''))
         }
 
-        if (token !== renderToken) return
-        const clone = previewRoot.cloneNode(true)
-        clone.querySelectorAll('img').forEach((img) => {
-          const finalSrc = img.getAttribute('data-img-output-src')
-          if (finalSrc) img.setAttribute('src', finalSrc)
-          img.removeAttribute('data-img-output-src')
-          img.removeAttribute('data-img-src-raw')
-        })
-        finalEl.textContent = clone.innerHTML.trim()
-      }
+        const buildSampleMarkup = (sample) => {
+          const chipHtml = sample.chips
+            .map((chip) => `<span class="chip">${escapeHtml(chip)}</span>`)
+            .join('')
 
-      markdownEl.addEventListener('input', () => {
-        if (!createContext || !applyImageTransforms) return
-        const markdownCont = markdownEl.value
-        const renderedHtml = renderMarkdown(markdownCont)
-        renderedEl.textContent = renderedHtml.trim()
-        previewRoot.innerHTML = renderedHtml
-        createContext(markdownCont, { resize: true, previewMode: 'local' }, previewRoot)
-          .then((context) => applyImageTransforms(previewRoot, context, markdownCont))
-          .then(() => {
-            const clone = previewRoot.cloneNode(true)
-            clone.querySelectorAll('img').forEach((img) => {
-              const finalSrc = img.getAttribute('data-img-output-src')
-              if (finalSrc) img.setAttribute('src', finalSrc)
-              img.removeAttribute('data-img-output-src')
-              img.removeAttribute('data-img-src-raw')
+          return `
+            <header class="sample-head">
+              <div class="sample-index">${escapeHtml(sample.index)}</div>
+              <h2>${escapeHtml(sample.title)}</h2>
+              <p>${escapeHtml(sample.summary)}</p>
+              <div class="sample-meta">${chipHtml}</div>
+            </header>
+
+            <div class="sample-grid">
+              <section class="pane">
+                <header class="pane-head">
+                  <h3>Markdown</h3>
+                  <p>Edit freely. {{LMD}} is resolved only inside this harness.</p>
+                </header>
+                <textarea class="code-area" data-role="markdown" spellcheck="false"></textarea>
+              </section>
+
+              <section class="pane">
+                <header class="pane-head">
+                  <h3>HTML Preview</h3>
+                  <p>${escapeHtml(sample.previewNote)}</p>
+                </header>
+                <div class="preview-stage" data-role="preview"></div>
+              </section>
+
+              <section class="pane">
+                <header class="pane-head">
+                  <h3>HTML Output Source</h3>
+                  <p>${escapeHtml(sample.outputNote)}</p>
+                </header>
+                <textarea class="code-area" data-role="output" spellcheck="false" readonly></textarea>
+              </section>
+            </div>
+          `
+        }
+
+        const buildSampleSection = (sample) => {
+          const section = document.createElement('section')
+          section.className = 'sample'
+          section.innerHTML = buildSampleMarkup(sample)
+          return {
+            section,
+            markdownNode: section.querySelector('[data-role="markdown"]'),
+            previewNode: section.querySelector('[data-role="preview"]'),
+            outputNode: section.querySelector('[data-role="output"]'),
+            timerId: 0,
+          }
+        }
+
+        const showError = (node, message) => {
+          node.value = String(message || 'Unknown error')
+          node.classList.add('error-text')
+        }
+
+        const clearError = (node) => {
+          node.classList.remove('error-text')
+        }
+
+        const resolveTokens = (markdownCont) => {
+          return String(markdownCont || '').replace(/\{\{LMD\}\}/g, getHarnessLmd())
+        }
+
+        const renderSample = async (sample, refs) => {
+          const authoredMarkdown = String(refs.markdownNode.value || sample.markdown)
+          const markdownCont = resolveTokens(authoredMarkdown)
+          clearError(refs.outputNode)
+          refs.previewNode.innerHTML = ''
+          refs.outputNode.value = ''
+
+          const sourceHtml = renderMarkdown(markdownCont)
+          refs.previewNode.innerHTML = sourceHtml
+
+          const previewContext = await api.createContext(markdownCont, sample.option, refs.previewNode)
+          await api.applyImageTransforms(refs.previewNode, previewContext, markdownCont)
+
+          const outputHtml = await api.applyImageTransformsToString(
+            sourceHtml,
+            { ...sample.option, previewMode: 'output' },
+            markdownCont
+          )
+
+          refs.outputNode.value = outputHtml
+        }
+
+        const scheduleRenderSample = (sample, refs) => {
+          if (refs.timerId) window.clearTimeout(refs.timerId)
+          refs.timerId = window.setTimeout(() => {
+            refs.timerId = 0
+            void renderSample(sample, refs).catch((error) => {
+              refs.previewNode.innerHTML = ''
+              showError(refs.outputNode, error && error.stack ? error.stack : String(error))
             })
-            finalEl.textContent = clone.innerHTML.trim()
-          })
-          .catch((error) => {
-            finalEl.textContent = 'Render error: ' + error.message
-          })
-      })
+          }, 120)
+        }
 
-      renderAll().catch((error) => {
-        finalEl.textContent = 'Render error: ' + error.message
-      })
+        const renderAll = async () => {
+          const renderedSamples = samples.map((sample) => {
+            const refs = buildSampleSection(sample)
+            root.appendChild(refs.section)
+            refs.markdownNode.value = sample.markdown
+            refs.markdownNode.addEventListener('input', () => {
+              scheduleRenderSample(sample, refs)
+            })
+            return { sample, refs }
+          })
+
+          if (!api || !markdown) {
+            const message = !api
+              ? 'preview-bundle.js did not load.'
+              : 'markdown-it did not load.'
+
+            for (const item of renderedSamples) {
+              showError(item.refs.outputNode, message)
+            }
+            return
+          }
+
+          for (const item of renderedSamples) {
+            try {
+              await renderSample(item.sample, item.refs)
+            } catch (error) {
+              item.refs.previewNode.innerHTML = ''
+              showError(item.refs.outputNode, error && error.stack ? error.stack : String(error))
+            }
+          }
+        }
+
+        void renderAll()
+      })()
     </script>
   </body>
 </html>
