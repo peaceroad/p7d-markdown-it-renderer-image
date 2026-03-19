@@ -5,7 +5,7 @@
 2. Prepare extension regex (query/hash ignored).
 3. Use `md.core.ruler.after('replacements')` to walk inline tokens and process each `image` token (no renderer override).
    - Read `srcRaw`/`title`; split base + query/hash.
-   - If `resolveSrc` and frontmatter (or `urlImageBase` option) exist: parse frontmatter, strip `lid`, build image base (`urlimage` absolute > `urlimagebase` + url path > `url`), treat relative `urlimage` as an image directory (basename only), normalize; keep query/hash.
+   - If `resolveSrc` and frontmatter (or `urlImageBase` option) exist: normalize frontmatter aliases (`page.url` / `images.baseUrl` / `images.stripLocalPrefix` / `local.markdownDir` / `images.scale`, plus legacy flat keys), strip `lid`, build image base (`images.dirUrl` or absolute `urlimage` > `urlimagebase` + url path > `url`), normalize; keep query/hash.
    - Node frontmatter precedence: `env.frontmatter` first; otherwise use `md.frontmatter` / `md.meta` only when the current source starts with YAML frontmatter. Do not rely on `md.env.frontmatter`.
    - Apply `outputUrlMode` to final URL.
    - Set final `src`/`alt`/`title`. Emit effective resize metadata in `resizeDataAttr` (default `data-img-resize`); emit `${resizeDataAttr}-origin` only for `imagescale`-derived values. Title is removed only when `autoHideResizeTitle` + `resize` + resize-pattern match. Emit `data-img-scale-suffix` when filename scale suffix metadata is available. Optional `decoding`/`loading`.
@@ -19,10 +19,10 @@
    - Also exports `defaultSharedOptions`, `defaultDomOptions`, `defaultNodeOptions` for shared defaults.
    - `runInPreview({ root, markdownCont, observe, ... })` is a high-level helper for preview usage (create context + apply + optional observer).
    - Default export is a no-op shim returning `Promise.resolve()`; `suppressNoopWarning` silences the browser warning.
-2. `createContext(markdownCont, options, root)` parses options and YAML frontmatter (`url`/`urlimage`/`urlimagebase`/`lid`/`lmd`/`imagescale`, lowercase only) and optionally reads `meta[name="markdown-frontmatter"]` when `readMeta: true` (merging `_extensionSettings.rendererImage` unless disabled).
+2. `createContext(markdownCont, options, root)` parses options and YAML frontmatter (legacy flat keys plus dotted keys and simple nested object forms) and optionally reads `meta[name="markdown-frontmatter"]` when `readMeta: true` (merging `_extensionSettings.rendererImage` unless disabled).
 3. `applyImageTransforms(root, contextOrOptions)`:
    - `root` accepts a document/container, a single `<img>`, or an iterable of `<img>` elements.
-   - Applies path rewriting when `resolveSrc: true`, using image base (`urlimage` absolute > `urlimagebase` + url path > `url`, with `urlImageBase` option as fallback). Relative `urlimage` is treated as an image directory (basename only).
+   - Applies path rewriting when `resolveSrc: true`, using image base (`images.dirUrl` or absolute `urlimage` > `urlimagebase` + url path > `url`, with `urlImageBase` option as fallback). Non-absolute `images.dirUrl` / `urlimage` values are ignored with a warning.
    - `lmd` handling: keep existing URL schemes; if `lmd` is an absolute local path, convert to `file:///` with URL-encoded segments and a trailing slash; relative `lmd` stays relative.
    - `previewMode`: `output` | `markdown` | `local`. When not `output`, store final URL in `previewOutputSrcAttr` and cache original `src` in `data-img-src-raw`; when `setDomSrc: true`, reused `<img>` nodes also track the helper-managed display `src` so external `src` edits are picked up instead of reusing stale raw values.
    - `setDomSrc: false` keeps `img.src` untouched while still running size probes.
@@ -50,6 +50,7 @@
 
 ## Utilities (script/img-util.js)
 - Frontmatter parsing, path normalization, resize classification (`classifyResizeHint`), resize/scaleSuffix regexes, image base resolution, and size adjustment (`setImgSize`).
+- Frontmatter alias normalization accepts dotted keys first, nested object keys second, and legacy flat keys third; conflicts warn and invalid non-absolute `images.dirUrl` / `urlimage` values are ignored. Relative or empty `urlimage` values are not treated as subdirectory hints.
 - Frontmatter normalization removes only a leading `./` (not arbitrary single-character prefixes).
 - URL path extraction treats only `.html`, `.htm`, `.xhtml` as file names; other dotted segments are kept as directories.
 - Shared URL helpers (scheme checks, basename, extension regex, `applyOutputUrlMode`) are centralized here and used by both Node and DOM.
@@ -67,7 +68,6 @@
 - Remote sizing in `index.js` uses synchronous fetch; if enabled in an extension host, it can block UI. Prefer `disableRemoteSize: true` in VS Code.
 - Protocol-relative remote sizing now falls back from `https:` to `http:` for measurement, but the emitted `src` is left unchanged.
 - `remoteMaxBytes` only applies when content-length is present; large remote downloads can still occur without it.
-- Relative `urlimage` enforces basename-only for relative `src` when a base URL is used.
 - `outputUrlMode: path-only` assumes same-origin and will drop the domain.
 - `previewMode: 'markdown'` keeps the markdown `src` for display; in VS Code Webview, relative paths may not resolve, so use `previewMode: 'output'` there.
 - On `file://` pages, the DOM script auto-sets `suppressErrors: 'local'` and disables `enableSizeProbe` unless explicitly overridden to reduce noisy local load errors.

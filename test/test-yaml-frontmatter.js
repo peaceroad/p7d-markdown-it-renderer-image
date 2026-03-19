@@ -188,15 +188,15 @@ try {
   const hUrlImage = mdFrontmatter.render('![Alt](images/cat.jpg)', envUrlImage)
   assert.strictEqual(hUrlImage, '<p><img src="https://image.example.com/assets/images/cat.jpg" alt="Alt"></p>\n')
 
-  const envUrlImageBase = {
+  const envUrlImageBaseIgnored = {
     frontmatter: {
       url: 'https://example.com/page',
       urlimagebase: 'https://image.example.com/assets/',
       urlimage: '2025',
     },
   }
-  const hUrlImageBase = mdFrontmatter.render('![Alt](foo/bar/cat.jpg)', envUrlImageBase)
-  assert.strictEqual(hUrlImageBase, '<p><img src="https://image.example.com/assets/page/2025/cat.jpg" alt="Alt"></p>\n')
+  const hUrlImageBaseIgnored = mdFrontmatter.render('![Alt](foo/bar/cat.jpg)', envUrlImageBaseIgnored)
+  assert.strictEqual(hUrlImageBaseIgnored, '<p><img src="https://image.example.com/assets/page/foo/bar/cat.jpg" alt="Alt"></p>\n')
 
   const envUrlImageBaseHtml = {
     frontmatter: {
@@ -216,14 +216,14 @@ try {
   const hUrlImageBaseDotDir = mdFrontmatter.render('![Alt](cat.jpg)', envUrlImageBaseDotDir)
   assert.strictEqual(hUrlImageBaseDotDir, '<p><img src="https://image.example.com/assets/v1.2/cat.jpg" alt="Alt" width="400" height="300"></p>\n')
 
-  const envUrlImageRelative = {
+  const envUrlImageRelativeIgnored = {
     frontmatter: {
       url: 'https://example.com/page',
       urlimage: '2025',
     },
   }
-  const hUrlImageRelative = mdFrontmatter.render('![Alt](foo/bar/cat.jpg)', envUrlImageRelative)
-  assert.strictEqual(hUrlImageRelative, '<p><img src="https://example.com/page/2025/cat.jpg" alt="Alt"></p>\n')
+  const hUrlImageRelativeIgnored = mdFrontmatter.render('![Alt](foo/bar/cat.jpg)', envUrlImageRelativeIgnored)
+  assert.strictEqual(hUrlImageRelativeIgnored, '<p><img src="https://example.com/page/foo/bar/cat.jpg" alt="Alt"></p>\n')
 
   const envUrlImageEmpty = {
     frontmatter: {
@@ -233,7 +233,7 @@ try {
     },
   }
   const hUrlImageEmpty = mdFrontmatter.render('![Alt](foo/bar/cat.jpg)', envUrlImageEmpty)
-  assert.strictEqual(hUrlImageEmpty, '<p><img src="https://image.example.com/assets/page/cat.jpg" alt="Alt"></p>\n')
+  assert.strictEqual(hUrlImageEmpty, '<p><img src="https://image.example.com/assets/page/foo/bar/cat.jpg" alt="Alt"></p>\n')
 
   const hOptionBase = mdOptionBase.render('![Alt](foo/bar/cat.jpg)')
   assert.strictEqual(hOptionBase, '<p><img src="https://image.example.com/assets/foo/bar/cat.jpg" alt="Alt"></p>\n')
@@ -266,6 +266,79 @@ try {
 }
 
 console.log('===========================================================')
+console.log('test-yaml-frontmatter.js - dotted and nested frontmatter aliases')
+try {
+  const parsedNested = parseFrontmatter(`---
+page:
+  url: https://example.com/page
+images:
+  baseUrl: https://image.example.com/assets/
+  stripLocalPrefix: images/
+local:
+  markdownDir: C:\\Users\\me\\Pictures
+---`)
+  assert.deepStrictEqual(parsedNested, {
+    page: {
+      url: 'https://example.com/page',
+    },
+    images: {
+      baseUrl: 'https://image.example.com/assets/',
+      stripLocalPrefix: 'images/',
+    },
+    local: {
+      markdownDir: 'C:\\Users\\me\\Pictures',
+    },
+  })
+
+  const fmDotted = getFrontmatter({
+    'page.url': 'https://example.com/page',
+    'images.baseUrl': 'https://image.example.com/assets/',
+    'images.stripLocalPrefix': 'images',
+    'local.markdownDir': 'C:\\Users\\me\\Pictures',
+    'images.scale': '50%',
+  })
+  assert.strictEqual(fmDotted.url, 'https://example.com/page/')
+  assert.strictEqual(fmDotted.urlimagebase, 'https://image.example.com/assets/')
+  assert.strictEqual(fmDotted.lid, 'images/')
+  assert.strictEqual(fmDotted.lmd, 'C:/Users/me/Pictures/')
+  assert.strictEqual(fmDotted.imageScaleResizeValue, '50%')
+
+  const hDottedBase = mdFrontmatter.render('![Alt](cat.jpg)', {
+    frontmatter: {
+      'page.url': 'https://example.com/page',
+      'images.baseUrl': 'https://image.example.com/assets/',
+    },
+  })
+  assert.strictEqual(hDottedBase, '<p><img src="https://image.example.com/assets/page/cat.jpg" alt="Alt" width="400" height="300"></p>\n')
+
+  const hNestedDirUrl = mdFrontmatter.render('![Alt](cat.jpg)', {
+    frontmatter: {
+      page: {
+        url: 'https://example.com/page',
+      },
+      images: {
+        dirUrl: 'https://image.example.com/assets/',
+      },
+    },
+  })
+  assert.strictEqual(hNestedDirUrl, '<p><img src="https://image.example.com/assets/cat.jpg" alt="Alt" width="400" height="300"></p>\n')
+
+  const frontmatterWarnings = []
+  const fmLegacyFallback = getFrontmatter({
+    'images.dirUrl': '2025',
+    urlimage: 'https://legacy.example.com/assets/',
+  }, {
+    onWarning: (message) => frontmatterWarnings.push(message),
+  })
+  assert.strictEqual(fmLegacyFallback.urlimage, 'https://legacy.example.com/assets/')
+  assert.ok(frontmatterWarnings.some((message) => message.includes('Ignoring images.dirUrl')))
+} catch (e) {
+  pass = false
+  console.log('incorrect(dotted and nested aliases): ')
+  console.log(e.message)
+}
+
+console.log('===========================================================')
 console.log('test-yaml-frontmatter.js - non-string guards')
 try {
   assert.deepStrictEqual(parseFrontmatter(null), {})
@@ -292,9 +365,8 @@ try {
   assert.strictEqual(fm.lmd, '')
   const fmRelativeLid = getFrontmatter({ lid: 'a/path' }, {})
   assert.strictEqual(fmRelativeLid.lid, 'a/path/')
-  const fmRelativeImageDir = getFrontmatter({ urlimage: 'a/path' }, {})
-  assert.strictEqual(fmRelativeImageDir.hasImageDir, true)
-  assert.strictEqual(fmRelativeImageDir.imageDir, 'a/path/')
+  const fmRelativeUrlImage = getFrontmatter({ urlimage: 'a/path' }, {})
+  assert.strictEqual(fmRelativeUrlImage.urlimage, '')
 
   assert.deepStrictEqual(classifyResizeHint(''), {
     state: 'empty',

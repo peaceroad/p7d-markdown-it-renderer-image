@@ -66,6 +66,7 @@ observer?.disconnect()
 - In browser builds, package-root import resolves to the DOM helper (named exports + no-op default export).
 - The default export in the DOM helper is intentionally a no-op and returns a resolved Promise.
 - `createContext()` reads YAML frontmatter from `markdownCont` (first argument).
+- DOM and Node frontmatter normalization accepts legacy flat keys, dotted keys, and simple nested object forms.
 - With `readMeta: true`, DOM helper additionally reads `meta[name="markdown-frontmatter"]` (JSON).
 
 ## Common Presets
@@ -160,7 +161,23 @@ Additional DOM behavior:
 
 ## Frontmatter Resolution Workflow
 
-When `resolveSrc: true`, frontmatter keys are used (`url`, `urlimage`, `urlimagebase`, `lid`, `lmd`, `imagescale`).
+When `resolveSrc: true`, frontmatter normalization accepts these logical fields:
+
+- `page.url` with flat compatibility alias `url`
+- `images.baseUrl` with flat compatibility alias `urlimagebase`
+- `images.stripLocalPrefix` with flat compatibility alias `lid`
+- `local.markdownDir` with flat compatibility alias `lmd`
+- `images.scale` with flat compatibility alias `imagescale`
+- `images.dirUrl` with flat compatibility alias `urlimage` for an absolute public image directory URL
+
+Supported aliases are resolved in this order:
+
+1. dotted keys
+2. nested object keys
+3. flat compatibility aliases
+
+Conflicting values emit a warning. `images.dirUrl` and `urlimage` must be absolute; invalid values are ignored.
+Relative or empty `urlimage` values are not treated as subdirectory hints anymore.
 
 Node precedence:
 - Prefer `env.frontmatter` when provided.
@@ -169,12 +186,11 @@ Node precedence:
 
 Base URL selection order:
 
-1. Absolute `urlimage`
-2. `urlimagebase` + path extracted from `url`
-3. `url`
+1. Absolute `images.dirUrl` or `urlimage`
+2. `images.baseUrl` / `urlimagebase` + path extracted from `page.url` / `url`
+3. `page.url` / `url`
 
 Rules:
-- Relative `urlimage` is treated as an image directory; basename-only from original `src` is used.
 - `lid` strips a local prefix from relative `src`.
 - Query/hash are preserved.
 

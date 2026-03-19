@@ -22,6 +22,8 @@ const dotCharCode = 46
 const lowerRCharCode = 114
 const upperRCharCode = 82
 const katakanaRiCharCode = 12522
+const yamlFrontmatterFenceLf = '---\n'
+const yamlFrontmatterFenceCrLf = '---\r\n'
 
 const needsPathNormalization = (text) => {
   const len = text.length
@@ -57,6 +59,126 @@ const toText = (value) => {
   if (value instanceof String) return value.valueOf()
   return ''
 }
+const isRecordObject = (value) => !!value && typeof value === 'object' && !Array.isArray(value)
+const hasOwn = (value, key) => isRecordObject(value) && Object.prototype.hasOwnProperty.call(value, key)
+const parseFrontmatterScalar = (value) => {
+  const text = toText(value).trim()
+  if (!text) return ''
+  if ((text.startsWith('"') && text.endsWith('"')) ||
+      (text.startsWith("'") && text.endsWith("'"))) {
+    return text.slice(1, -1)
+  }
+  if (text === 'true') return true
+  if (text === 'false') return false
+  return text
+}
+const getDirectFrontmatterValue = (frontmatter, key) => {
+  if (!hasOwn(frontmatter, key)) return { present: false, value: undefined }
+  return { present: true, value: frontmatter[key] }
+}
+const getNestedFrontmatterValue = (frontmatter, path) => {
+  if (!isRecordObject(frontmatter) || !Array.isArray(path) || path.length === 0) {
+    return { present: false, value: undefined }
+  }
+  let current = frontmatter
+  const lastIndex = path.length - 1
+  for (let i = 0; i < lastIndex; i += 1) {
+    const segment = path[i]
+    if (!hasOwn(current, segment) || !isRecordObject(current[segment])) {
+      return { present: false, value: undefined }
+    }
+    current = current[segment]
+  }
+  const lastKey = path[lastIndex]
+  if (!hasOwn(current, lastKey)) return { present: false, value: undefined }
+  return { present: true, value: current[lastKey] }
+}
+const normalizeFrontmatterConflictValue = (value) => {
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value)
+  if (typeof value === 'boolean') return value ? 'true' : 'false'
+  return toText(value).trim().replace(/\\/g, '/')
+}
+const createDirectAlias = (label, key, meta = {}) => Object.freeze({
+  label,
+  ...meta,
+  get: (frontmatter) => getDirectFrontmatterValue(frontmatter, key),
+})
+const createNestedAlias = (label, path, meta = {}) => Object.freeze({
+  label,
+  ...meta,
+  get: (frontmatter) => getNestedFrontmatterValue(frontmatter, path),
+})
+const warnFrontmatterConflict = (fieldName, selectedLabel, sourceLabels, onWarning) => {
+  if (typeof onWarning !== 'function') return
+  const sources = sourceLabels.join(', ')
+  onWarning(`Conflicting frontmatter values for ${fieldName}. Using ${selectedLabel}. Sources: ${sources}`)
+}
+const resolveFrontmatterAlias = (frontmatter, fieldName, aliases, options = {}, acceptOverride = null) => {
+  const accept = typeof acceptOverride === 'function'
+    ? acceptOverride
+    : (typeof options.accept === 'function'
+    ? options.accept
+    : null)
+  const normalizeCompareValue = typeof options.normalizeCompareValue === 'function'
+    ? options.normalizeCompareValue
+    : normalizeFrontmatterConflictValue
+  let selected = null
+  let selectedCompareValue = ''
+  let sourceLabels = null
+  let hasConflict = false
+  for (const alias of aliases) {
+    const candidate = alias.get(frontmatter)
+    if (!candidate.present) continue
+    if (accept && !accept(candidate.value, alias)) continue
+    const compareValue = normalizeCompareValue(candidate.value)
+    if (!selected) {
+      selected = {
+        present: true,
+        value: candidate.value,
+        label: alias.label,
+      }
+      selectedCompareValue = compareValue
+      continue
+    }
+    if (!sourceLabels) sourceLabels = [selected.label]
+    sourceLabels.push(alias.label)
+    if (!hasConflict && compareValue !== selectedCompareValue) hasConflict = true
+  }
+  if (selected && hasConflict && sourceLabels) {
+    warnFrontmatterConflict(fieldName, selected.label, sourceLabels, options.onWarning)
+  }
+  return selected || { present: false, value: undefined, label: '' }
+}
+const urlFrontmatterAliases = Object.freeze([
+  createDirectAlias('page.url', 'page.url'),
+  createNestedAlias('page.url (nested)', ['page', 'url']),
+  createDirectAlias('url', 'url'),
+])
+const urlImageFrontmatterAliases = Object.freeze([
+  createDirectAlias('images.dirUrl', 'images.dirUrl', { absoluteOnly: true }),
+  createNestedAlias('images.dirUrl (nested)', ['images', 'dirUrl'], { absoluteOnly: true }),
+  createDirectAlias('urlimage', 'urlimage', { absoluteOnly: true }),
+])
+const urlImageBaseFrontmatterAliases = Object.freeze([
+  createDirectAlias('images.baseUrl', 'images.baseUrl'),
+  createNestedAlias('images.baseUrl (nested)', ['images', 'baseUrl']),
+  createDirectAlias('urlimagebase', 'urlimagebase'),
+])
+const stripLocalPrefixFrontmatterAliases = Object.freeze([
+  createDirectAlias('images.stripLocalPrefix', 'images.stripLocalPrefix'),
+  createNestedAlias('images.stripLocalPrefix (nested)', ['images', 'stripLocalPrefix']),
+  createDirectAlias('lid', 'lid'),
+])
+const localMarkdownDirFrontmatterAliases = Object.freeze([
+  createDirectAlias('local.markdownDir', 'local.markdownDir'),
+  createNestedAlias('local.markdownDir (nested)', ['local', 'markdownDir']),
+  createDirectAlias('lmd', 'lmd'),
+])
+const imageScaleFrontmatterAliases = Object.freeze([
+  createDirectAlias('images.scale', 'images.scale'),
+  createNestedAlias('images.scale (nested)', ['images', 'scale']),
+  createDirectAlias('imagescale', 'imagescale'),
+])
 const safeDecodeUri = (value) => {
   const text = toText(value)
   if (!text) return ''
@@ -227,26 +349,39 @@ const getImageName = (value) => {
 }
 
 const parseFrontmatter = (markdownCont) => {
-  if (typeof markdownCont !== 'string' || !markdownCont) return {}
-  const yamlMatch = markdownCont.match(yamlReg)
+  const text = toText(markdownCont)
+  if (!text) return {}
+  if (text !== '---' && !text.startsWith(yamlFrontmatterFenceLf) && !text.startsWith(yamlFrontmatterFenceCrLf)) {
+    return {}
+  }
+  const yamlMatch = text.match(yamlReg)
   if (!yamlMatch) return {}
   const yamlContent = yamlMatch[1]
   const result = {}
   const lines = yamlContent.split(/\r?\n/)
+  let currentSectionKey = ''
   for (const line of lines) {
-    const trimmedLine = line.trim()
+    const lineMatch = line.match(/^([ \t]*)(.*)$/)
+    const indentText = lineMatch ? lineMatch[1] : ''
+    const indentSize = indentText.replace(/\t/g, '  ').length
+    const trimmedLine = lineMatch ? lineMatch[2].trim() : line.trim()
     if (!trimmedLine || trimmedLine.startsWith('#')) continue
     const colonIndex = trimmedLine.indexOf(':')
     if (colonIndex === -1) continue
     const key = trimmedLine.substring(0, colonIndex).trim()
-    let value = trimmedLine.substring(colonIndex + 1).trim()
-    if ((value.startsWith('"') && value.endsWith('"')) || 
-        (value.startsWith("'") && value.endsWith("'"))) {
-      value = value.slice(1, -1)
+    const value = trimmedLine.substring(colonIndex + 1).trim()
+    if (indentSize > 0) {
+      if (!currentSectionKey || !isRecordObject(result[currentSectionKey])) continue
+      result[currentSectionKey][key] = parseFrontmatterScalar(value)
+      continue
     }
-    if (value === 'true') value = true
-    if (value === 'false') value = false
-    result[key] = value
+    currentSectionKey = ''
+    if (value === '') {
+      result[key] = {}
+      currentSectionKey = key
+      continue
+    }
+    result[key] = parseFrontmatterScalar(value)
   }
   return result
 }
@@ -389,49 +524,53 @@ const setImgSize = (imgName, imgData, scaleSuffix, resize, title, imageScale, no
   return { width: w, height: h }
 }
 
-const getFrontmatter = (frontmatter) => {
-  if (!frontmatter || typeof frontmatter !== 'object' || Array.isArray(frontmatter)) return null
+const getFrontmatter = (frontmatter, option = {}) => {
+  if (!isRecordObject(frontmatter)) return null
 
-  let lid = toText(frontmatter.lid)
+  const warn = (message) => {
+    if (typeof option.onWarning === 'function') option.onWarning(message)
+  }
+  const acceptAbsoluteOnlyAlias = (value, alias) => {
+    if (!alias.absoluteOnly) return true
+    const text = toText(value).trim()
+    if (text && isAbsoluteUrl(text)) return true
+    warn(`Ignoring ${alias.label} because it must be an absolute URL.`)
+    return false
+  }
+
+  const resolvedLid = resolveFrontmatterAlias(frontmatter, 'images.stripLocalPrefix', stripLocalPrefixFrontmatterAliases, option)
+  const resolvedUrl = resolveFrontmatterAlias(frontmatter, 'page.url', urlFrontmatterAliases, option)
+  const resolvedUrlImage = resolveFrontmatterAlias(frontmatter, 'images.dirUrl', urlImageFrontmatterAliases, option, acceptAbsoluteOnlyAlias)
+  const resolvedUrlImageBase = resolveFrontmatterAlias(frontmatter, 'images.baseUrl', urlImageBaseFrontmatterAliases, option)
+  const resolvedLmd = resolveFrontmatterAlias(frontmatter, 'local.markdownDir', localMarkdownDirFrontmatterAliases, option)
+  const resolvedImageScale = resolveFrontmatterAlias(frontmatter, 'images.scale', imageScaleFrontmatterAliases, option)
+
+  let lid = toText(resolvedLid.value)
   if (lid) lid = lid.replace(/\\/g, '/')
   if (lid) {
     if (!/\/$/.test(lid)) lid += '/'
     if (/^\.\//.test(lid)) lid = lid.replace(/^\.\//, '')
   }
-  let url = toText(frontmatter.url)
+  let url = toText(resolvedUrl.value)
   if (url) {
     if (!url.endsWith('/')) url += '/'
   }
-  const hasUrlImageKey = Object.prototype.hasOwnProperty.call(frontmatter, 'urlimage')
-  let urlimage = toText(frontmatter.urlimage)
-  let imageDir = ''
-  let hasImageDir = false
-  const urlimageIsAbsolute = urlimage ? isAbsoluteUrl(urlimage) : false
-  if (urlimage && urlimageIsAbsolute) {
+  let urlimage = toText(resolvedUrlImage.value)
+  if (urlimage) {
     if (!urlimage.endsWith('/')) urlimage += '/'
-  } else if (hasUrlImageKey) {
-    hasImageDir = true
-    imageDir = urlimage
-    urlimage = ''
   }
-  let urlimagebase = toText(frontmatter.urlimagebase)
+  let urlimagebase = toText(resolvedUrlImageBase.value)
   if (urlimagebase) {
     if (!urlimagebase.endsWith('/')) urlimagebase += '/'
   }
-  if (imageDir === '.' || imageDir === './') imageDir = ''
-  if (imageDir) {
-    if (!/\/$/.test(imageDir)) imageDir += '/'
-    if (/^\.\//.test(imageDir)) imageDir = imageDir.replace(/^\.\//, '')
-    imageDir = imageDir.replace(/^\/+/, '')
-  }
-  let lmd = toText(frontmatter.lmd)
+  let lmd = toText(resolvedLmd.value)
   if (lmd) lmd = lmd.replace(/\\/g, '/')
   if (lmd) {
     if (!/\/$/.test(lmd)) lmd += '/'
   }
-  const imageScale = parseImageScale(frontmatter.imagescale)
-  const imageScaleResizeValue = getImageScaleResizeValue(frontmatter.imagescale)
-  return { url, urlimage, urlimagebase, lid, imageDir, hasImageDir, lmd, imageScale, imageScaleResizeValue }
+  const imageScale = parseImageScale(resolvedImageScale.value)
+  const imageScaleResizeValue = getImageScaleResizeValue(resolvedImageScale.value)
+  return { url, urlimage, urlimagebase, lid, lmd, imageScale, imageScaleResizeValue }
 }
 
 const resolveImageBase = (frontmatter) => {

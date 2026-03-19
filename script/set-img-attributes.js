@@ -19,7 +19,6 @@ import {
   toFileUrl,
   escapeForRegExp,
   stripQueryHash,
-  getBasename,
   getImageName,
   applyOutputUrlMode,
 } from './img-util.js'
@@ -300,7 +299,6 @@ const sharedContextUtils = Object.freeze({
   hasUrlScheme,
   hasSpecialScheme,
   stripQueryHash,
-  getBasename,
   getImageName,
   applyOutputUrlMode,
 })
@@ -415,7 +413,7 @@ export const createContext = async (markdownCont = '', option = {}, root = null)
     }
   }
 
-  const currentOpt = { ...opt }
+  const currentOpt = opt
   const suppressErrorsOverridden = optionOverrides.has('suppressErrors')
     || (extensionSettings?.rendererImage
       && Object.prototype.hasOwnProperty.call(extensionSettings.rendererImage, 'suppressErrors'))
@@ -463,8 +461,10 @@ export const createContext = async (markdownCont = '', option = {}, root = null)
   }
   const resolveSrcEnabled = currentOpt.resolveSrc
 
-  const resolvedFrontmatter = getFrontmatter(frontmatter) || {}
-  const { url, urlimage, urlimagebase, lid, lmd, imageDir, hasImageDir, imageScale, imageScaleResizeValue } = resolvedFrontmatter
+  const resolvedFrontmatter = getFrontmatter(frontmatter, {
+    onWarning: (message) => console.warn(`[renderer-image(dom)] ${message}`),
+  }) || {}
+  const { url, urlimage, urlimagebase, lid, lmd, imageScale, imageScaleResizeValue } = resolvedFrontmatter
   const imageBase = resolveSrcEnabled
     ? resolveImageBase({
       url,
@@ -516,8 +516,6 @@ export const createContext = async (markdownCont = '', option = {}, root = null)
     loadSrcResolver,
     loadSrcMap,
     loadSrcPrefixEntries,
-    imageDir,
-    hasImageDir,
     imageScale,
     imageScaleResizeValue,
     onImageProcessed,
@@ -545,8 +543,6 @@ export const applyImageTransforms = async (root, contextOrOptions = {}, markdown
     loadSrcResolver,
     loadSrcMap,
     loadSrcPrefixEntries,
-    imageDir,
-    hasImageDir,
     imageScale,
     imageScaleResizeValue,
     onImageProcessed,
@@ -562,7 +558,6 @@ export const applyImageTransforms = async (root, contextOrOptions = {}, markdown
     isFileUrl,
     hasSpecialScheme,
     stripQueryHash,
-    getBasename,
     getImageName,
     applyOutputUrlMode,
   } = utils
@@ -801,10 +796,6 @@ export const applyImageTransforms = async (root, contextOrOptions = {}, markdown
 
         let nextSrc = localNormalized
         if (imageBase && !localNormalized.startsWith('/')) {
-          if (hasImageDir) {
-            nextSrc = getBasename(nextSrc)
-            if (imageDir) nextSrc = `${imageDir}${nextSrc}`
-          }
           nextSrc = `${imageBase}${nextSrc}`
         }
         src = normalizeRelativePath(nextSrc)
