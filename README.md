@@ -163,22 +163,20 @@ Additional DOM behavior:
 
 When `resolveSrc: true`, frontmatter normalization accepts these logical fields:
 
-- `page.url` or legacy `url`
-- `images.baseUrl` or legacy `urlimagebase`
-- `images.stripLocalPrefix` or legacy `lid`
-- `local.markdownDir` or legacy `lmd`
-- `images.scale` or legacy `imagescale`
-- `images.dirUrl` for an absolute public image directory URL
-
-Legacy `urlimage` is still accepted as an alias for an absolute public image directory URL.
+- `page.url` with flat compatibility alias `url`
+- `images.baseUrl` with flat compatibility alias `urlimagebase`
+- `images.stripLocalPrefix` with flat compatibility alias `lid`
+- `local.markdownDir` with flat compatibility alias `lmd`
+- `images.scale` with flat compatibility alias `imagescale`
+- `images.dirUrl` with flat compatibility alias `urlimage` for an absolute public image directory URL
 
 Supported aliases are resolved in this order:
 
 1. dotted keys
 2. nested object keys
-3. legacy flat keys
+3. flat compatibility aliases
 
-Conflicting values emit a warning. `images.dirUrl` and legacy `urlimage` must be absolute; invalid values are ignored.
+Conflicting values emit a warning. `images.dirUrl` and `urlimage` must be absolute; invalid values are ignored.
 Relative or empty `urlimage` values are not treated as subdirectory hints anymore.
 
 Node precedence:
@@ -188,9 +186,9 @@ Node precedence:
 
 Base URL selection order:
 
-1. Absolute `images.dirUrl` or legacy `urlimage`
-2. `urlimagebase` + path extracted from `url`
-3. `url`
+1. Absolute `images.dirUrl` or `urlimage`
+2. `images.baseUrl` / `urlimagebase` + path extracted from `page.url` / `url`
+3. `page.url` / `url`
 
 Rules:
 - `lid` strips a local prefix from relative `src`.
