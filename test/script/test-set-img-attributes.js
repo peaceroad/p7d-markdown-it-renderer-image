@@ -615,8 +615,8 @@ lmd: https://file+.vscode-resource.vscode-cdn.net/abc/123
   assert.ok(!loadSrc.startsWith('file:///https://'), `Unexpected file URL prefix: ${loadSrc}`)
 })
 
-// Test 19: urlimagebase + urlimage (relative) uses basename
-await runTest(19, 'urlimagebase with urlimage relative uses basename', async () => {
+// Test 19: relative urlimage is ignored when urlimagebase is present
+await runTest(19, 'relative urlimage is ignored with urlimagebase', async () => {
   const images = [
     new MockElement('img', { src: 'foo/bar/cat.jpg', alt: 'cat' })
   ]
@@ -629,11 +629,11 @@ urlimage: 2025
   await testSetImageAttributes(images, {}, markdownWithYaml)
 
   const img = images[0]
-  assert.strictEqual(img.getAttribute('src'), 'https://image.example.com/assets/page/2025/cat.jpg')
+  assert.strictEqual(img.getAttribute('src'), 'https://image.example.com/assets/page/foo/bar/cat.jpg')
 })
 
-// Test 20: urlimage empty keeps basename only
-await runTest(20, 'urlimage empty keeps basename only', async () => {
+// Test 20: empty urlimage is ignored
+await runTest(20, 'empty urlimage is ignored', async () => {
   const images = [
     new MockElement('img', { src: 'foo/bar/cat.jpg', alt: 'cat' })
   ]
@@ -646,11 +646,11 @@ urlimage:
   await testSetImageAttributes(images, {}, markdownWithYaml)
 
   const img = images[0]
-  assert.strictEqual(img.getAttribute('src'), 'https://image.example.com/assets/page/cat.jpg')
+  assert.strictEqual(img.getAttribute('src'), 'https://image.example.com/assets/page/foo/bar/cat.jpg')
 })
 
-// Test 21: urlimage relative uses basename
-await runTest(21, 'urlimage relative uses basename', async () => {
+// Test 21: relative urlimage is ignored
+await runTest(21, 'relative urlimage is ignored', async () => {
   const images = [
     new MockElement('img', { src: 'foo/bar/cat.jpg', alt: 'cat' })
   ]
@@ -662,7 +662,35 @@ urlimage: 2025
   await testSetImageAttributes(images, {}, markdownWithYaml)
 
   const img = images[0]
-  assert.strictEqual(img.getAttribute('src'), 'https://example.com/page/2025/cat.jpg')
+  assert.strictEqual(img.getAttribute('src'), 'https://example.com/page/foo/bar/cat.jpg')
+})
+
+// Test 21.5: nested frontmatter aliases resolve in DOM mode
+await runTest(21.5, 'nested frontmatter aliases resolve in DOM mode', async () => {
+  const images = [
+    new MockElement('img', { src: 'cat.jpg', alt: 'cat' })
+  ]
+  const markdownWithYaml = `---
+page:
+  url: https://example.com/page
+images:
+  baseUrl: https://cdn.example.com/assets/
+local:
+  markdownDir: C:\\Users\\me\\Pictures
+---`
+  const originalLocation = global.location
+  global.location = { protocol: 'file:' }
+
+  try {
+    await testSetImageAttributes(images, { previewMode: 'local', enableSizeProbe: false }, markdownWithYaml)
+  } finally {
+    if (originalLocation === undefined) delete global.location
+    else global.location = originalLocation
+  }
+
+  const img = images[0]
+  assert.ok(img.getAttribute('src').startsWith('file:///C:/Users/me/Pictures/'))
+  assert.strictEqual(img.getAttribute('data-img-output-src'), 'https://cdn.example.com/assets/page/cat.jpg')
 })
 
 // Test 24: outputUrlMode protocol-relative

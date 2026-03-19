@@ -18,7 +18,6 @@ import {
   isFileUrl,
   hasSpecialScheme,
   stripQueryHash,
-  getBasename,
   applyOutputUrlMode,
   safeDecodeUri,
 } from './script/img-util.js'
@@ -270,7 +269,7 @@ const mditRendererImage = (md, option) => {
     } = fmContext
 
     if (resolveSrcEnabled && src && shouldParseFrontmatter) {
-      const { lid, imageDir, hasImageDir } = parsedFrontmatter
+      const { lid } = parsedFrontmatter
       const isLocalSrc = !isHttpUrl(src) && !isProtocolRelativeUrl(src) && !isFileUrl(src) && !hasSpecialScheme(src)
 
       if (isLocalSrc) {
@@ -282,12 +281,7 @@ const mditRendererImage = (md, option) => {
           }
         }
         if (imageBase && !src.startsWith('/')) {
-          let nextSrc = src
-          if (hasImageDir) {
-            nextSrc = getBasename(nextSrc)
-            if (imageDir) nextSrc = `${imageDir}${nextSrc}`
-          }
-          src = `${imageBase}${nextSrc}`
+          src = `${imageBase}${src}`
         }
         src = normalizeRelativePath(src)
       }
@@ -395,7 +389,9 @@ const mditRendererImage = (md, option) => {
       const hasFrontmatter = hasOwnEnumerableKeys(frontmatter)
       const shouldParseFrontmatter = hasFrontmatter || hasOptUrlImageBase
       const parsedFrontmatter = shouldParseFrontmatter
-        ? (getFrontmatter(frontmatter || {}) || {})
+        ? (getFrontmatter(frontmatter || {}, {
+          onWarning: (message) => console.warn(`[renderer-image] ${message}`),
+        }) || {})
         : {}
       const imageScale = shouldParseFrontmatter ? parsedFrontmatter.imageScale : null
       const imageScaleResizeValue = shouldParseFrontmatter ? parsedFrontmatter.imageScaleResizeValue : ''
