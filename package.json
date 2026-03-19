@@ -1,6 +1,6 @@
 {
   "name": "@peaceroad/markdown-it-renderer-image",
-  "version": "0.13.0",
+  "version": "0.14.0",
   "description": "A markdown-it image plugin plus a browser DOM helper for src rewriting and image sizing.",
   "main": "index.js",
   "type": "module",
