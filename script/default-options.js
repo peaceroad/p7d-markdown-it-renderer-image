@@ -1,6 +1,7 @@
 const defaultSharedOptions = Object.freeze({
   scaleSuffix: false, // scale by @2x or dpi/ppi suffix
   resize: false, // resize by title hint
+  conditionalResize: null, // conditional auto-resize policy after explicit resize/imageScale
   lazyLoad: false, // add loading="lazy"
   asyncDecode: false, // add decoding="async"
   checkImgExtensions: 'png,jpg,jpeg,gif,webp', // size only these extensions

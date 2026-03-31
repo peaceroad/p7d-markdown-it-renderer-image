@@ -451,6 +451,46 @@ const parseImageScale = (value) => {
   if (!Number.isFinite(numericValue) || numericValue <= 0) return null
   return Math.min(numericValue, 1)
 }
+const normalizeConditionalResizeNumber = (value, allowZero = false) => {
+  const numeric = Number(value)
+  if (!Number.isFinite(numeric)) return 0
+  if (allowZero) return numeric >= 0 ? numeric : 0
+  return numeric > 0 ? numeric : 0
+}
+const normalizeConditionalResizeTarget = (value) => {
+  const numeric = Math.round(Number(value))
+  return Number.isFinite(numeric) && numeric > 0 ? numeric : 0
+}
+const normalizeConditionalResize = (value, onWarning = null) => {
+  if (!isRecordObject(value)) return null
+  const warn = typeof onWarning === 'function' ? onWarning : null
+  if (hasOwn(value, 'enabled') && value.enabled === false) {
+    return null
+  }
+  const orientationRaw = toText(value.orientation).trim().toLowerCase()
+  const orientation = (orientationRaw === 'portrait' || orientationRaw === 'landscape')
+    ? orientationRaw
+    : ''
+  if (orientationRaw && !orientation) {
+    if (warn) warn(`Ignoring conditionalResize because orientation must be "portrait" or "landscape".`)
+    return null
+  }
+  const minWidth = normalizeConditionalResizeNumber(value.minWidth, true)
+  const minHeight = normalizeConditionalResizeNumber(value.minHeight, true)
+  const targetWidth = normalizeConditionalResizeTarget(value.targetWidth)
+  const targetHeight = normalizeConditionalResizeTarget(value.targetHeight)
+  if ((targetWidth > 0) === (targetHeight > 0)) {
+    if (warn) warn('Ignoring conditionalResize because exactly one of targetWidth or targetHeight is required.')
+    return null
+  }
+  return {
+    orientation,
+    minWidth,
+    minHeight,
+    targetWidth,
+    targetHeight,
+  }
+}
 const formatPercent = (value) => {
   if (!Number.isFinite(value) || value <= 0) return ''
   const rounded = Number(value.toFixed(6))
@@ -479,7 +519,7 @@ const getScaleSuffixValue = (imgName) => {
   return info ? info.value : ''
 }
 
-const setImgSize = (imgName, imgData, scaleSuffix, resize, title, imageScale, noUpscale) => {
+const setImgSize = (imgName, imgData, scaleSuffix, resize, title, imageScale, noUpscale, conditionalResize = null) => {
   if (!imgData) return {}
   const originalWidth = imgData.width
   const originalHeight = imgData.height
@@ -492,8 +532,7 @@ const setImgSize = (imgName, imgData, scaleSuffix, resize, title, imageScale, no
       if (unit === 'x') {
         w = Math.round(w / scale)
         h = Math.round(h / scale)
-      }
-      if (/[dp]pi/.test(unit)) {
+      } else if (/[dp]pi/.test(unit)) {
         w = Math.round(w * 96 / scale)
         h = Math.round(h * 96 / scale)
       }
@@ -504,15 +543,40 @@ const setImgSize = (imgName, imgData, scaleSuffix, resize, title, imageScale, no
     if (resizeInfo.unit === '%') {
       h = Math.round(h * resizeInfo.value / 100)
       w = Math.round(w * resizeInfo.value / 100)
-    }
-    if (resizeInfo.unit === 'px') {
+    } else if (resizeInfo.unit === 'px') {
       h = Math.round(h * resizeInfo.value / w)
       w = Math.round(resizeInfo.value)
     }
   }
-  if (!resizeInfo && imageScale && Number.isFinite(imageScale)) {
+  const hasExplicitResize = !!resizeInfo
+  const hasExplicitImageScale = !hasExplicitResize && Number.isFinite(imageScale) && imageScale > 0
+  if (hasExplicitImageScale) {
     w = Math.round(w * imageScale)
     h = Math.round(h * imageScale)
+  }
+  if (!hasExplicitResize && !hasExplicitImageScale && conditionalResize) {
+    const {
+      orientation = '',
+      minWidth = 0,
+      minHeight = 0,
+      targetWidth = 0,
+      targetHeight = 0,
+    } = conditionalResize
+    const matchesOrientation = !orientation
+      || (orientation === 'portrait' ? h > w : w > h)
+    const matchesMinWidth = !(minWidth > 0) || w >= minWidth
+    const matchesMinHeight = !(minHeight > 0) || h >= minHeight
+    if (matchesOrientation && matchesMinWidth && matchesMinHeight) {
+      if (targetWidth > 0 && w > 0) {
+        const scale = targetWidth / w
+        w = targetWidth
+        h = Math.round(h * scale)
+      } else if (targetHeight > 0 && h > 0) {
+        const scale = targetHeight / h
+        h = targetHeight
+        w = Math.round(w * scale)
+      }
+    }
   }
   if (noUpscale && Number.isFinite(originalWidth) && Number.isFinite(originalHeight) && w > 0 && h > 0) {
     const limitScale = Math.min(1, originalWidth / w, originalHeight / h)
@@ -615,6 +679,7 @@ export {
   buildImageExtensionRegExp,
   normalizeResizeValue,
   classifyResizeHint,
+  normalizeConditionalResize,
   getImageScaleResizeValue,
   getScaleSuffixValue,
   safeDecodeUri,

@@ -786,6 +786,80 @@ imagescale: 200%
   assert.strictEqual(img.getAttribute('data-img-resize-origin'), 'imagescale')
 })
 
+// Test 29.5: conditionalResize applies to portrait images without explicit resize
+await runTest(29.5, 'conditionalResize shrinks portrait images', async () => {
+  const images = [
+    new MockElement('img', { src: 'portrait.jpg', alt: 'portrait' })
+  ]
+  images[0].naturalWidth = 600
+  images[0].naturalHeight = 1200
+
+  await testSetImageAttributes(images, {
+    conditionalResize: {
+      enabled: true,
+      orientation: 'portrait',
+      minHeight: 560,
+      minWidth: 560,
+      targetWidth: 300,
+    },
+  })
+
+  const img = images[0]
+  assert.strictEqual(img.getAttribute('width'), '300')
+  assert.strictEqual(img.getAttribute('height'), '600')
+  assert.strictEqual(img.getAttribute('data-img-resize'), '')
+  assert.strictEqual(img.getAttribute('data-img-resize-origin'), '')
+})
+
+// Test 29.6: explicit resize paths win over conditionalResize
+await runTest(29.6, 'conditionalResize does not override title resize or imagescale', async () => {
+  const titleResizeImages = [
+    new MockElement('img', { src: 'portrait.jpg', alt: 'portrait', title: 'resize:25%' })
+  ]
+  titleResizeImages[0].naturalWidth = 600
+  titleResizeImages[0].naturalHeight = 1200
+
+  await testSetImageAttributes(titleResizeImages, {
+    resize: true,
+    conditionalResize: {
+      enabled: true,
+      orientation: 'portrait',
+      minHeight: 560,
+      minWidth: 560,
+      targetWidth: 250,
+    },
+  })
+
+  assert.strictEqual(titleResizeImages[0].getAttribute('width'), '150')
+  assert.strictEqual(titleResizeImages[0].getAttribute('height'), '300')
+  assert.strictEqual(titleResizeImages[0].getAttribute('data-img-resize'), '25%')
+  assert.strictEqual(titleResizeImages[0].getAttribute('data-img-resize-origin'), '')
+
+  const imageScaleImages = [
+    new MockElement('img', { src: 'portrait.jpg', alt: 'portrait' })
+  ]
+  imageScaleImages[0].naturalWidth = 600
+  imageScaleImages[0].naturalHeight = 1200
+  const markdownWithYaml = `---
+imagescale: 50%
+---`
+
+  await testSetImageAttributes(imageScaleImages, {
+    conditionalResize: {
+      enabled: true,
+      orientation: 'portrait',
+      minHeight: 560,
+      minWidth: 560,
+      targetWidth: 250,
+    },
+  }, markdownWithYaml)
+
+  assert.strictEqual(imageScaleImages[0].getAttribute('width'), '300')
+  assert.strictEqual(imageScaleImages[0].getAttribute('height'), '600')
+  assert.strictEqual(imageScaleImages[0].getAttribute('data-img-resize'), '50%')
+  assert.strictEqual(imageScaleImages[0].getAttribute('data-img-resize-origin'), 'imagescale')
+})
+
 // Test 30: title without resize keyword does not resize
 await runTest(30, 'Title-only value ignored', async () => {
   const images = [

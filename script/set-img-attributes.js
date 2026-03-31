@@ -6,6 +6,7 @@ import {
   resolveImageBase,
   normalizeResizeValue,
   classifyResizeHint,
+  normalizeConditionalResize,
   resizeValueReg,
   buildImageExtensionRegExp,
   getScaleSuffixValue,
@@ -47,6 +48,26 @@ const removeAttrIfPresent = (element, name) => {
   if (!element || typeof element.removeAttribute !== 'function') return
   if (!hasAttr(element, name)) return
   element.removeAttribute(name)
+}
+const syncManagedAttr = (img, managedState, attrName, enabled, expectedValue, stateKey) => {
+  const currentValue = getAttr(img, attrName)
+  if (enabled) {
+    if (!currentValue) {
+      setAttrIfChanged(img, attrName, expectedValue)
+      managedState[stateKey] = true
+      return
+    }
+    if (managedState[stateKey] && currentValue !== expectedValue) {
+      managedState[stateKey] = false
+    }
+    return
+  }
+  if (managedState[stateKey]) {
+    if (currentValue === expectedValue) {
+      removeAttrIfPresent(img, attrName)
+    }
+    managedState[stateKey] = false
+  }
 }
 const parseJsonSafe = (value) => {
   try {
@@ -340,6 +361,7 @@ const rendererFunctionOptionKeys = Object.freeze([
 const rendererObjectOptionKeys = Object.freeze([
   'loadSrcMap',
   'loadSrcPrefixMap',
+  'conditionalResize',
 ])
 const rendererArrayOptionKeys = Object.freeze([
   'observeAttributeFilter',
@@ -375,11 +397,10 @@ const applyRendererOptions = (targetOpt, rendererSettings, optionOverrides) => {
 export const createContext = async (markdownCont = '', option = {}, root = null) => {
   const opt = { ...defaultDomOptions }
   const safeOption = option && typeof option === 'object' ? { ...option } : null
-  const seedOption = safeOption ? { ...safeOption } : {}
   if (safeOption && Object.prototype.hasOwnProperty.call(safeOption, 'noUpscale')) {
     delete safeOption.noUpscale
-    delete seedOption.noUpscale
   }
+  const seedOption = safeOption || {}
   if (safeOption) Object.assign(opt, safeOption)
   const optionOverrides = new Set(safeOption ? Object.keys(safeOption) : [])
 
@@ -488,6 +509,9 @@ export const createContext = async (markdownCont = '', option = {}, root = null)
   const resizeDataAttr = typeof currentOpt.resizeDataAttr === 'string' && currentOpt.resizeDataAttr.trim()
     ? currentOpt.resizeDataAttr
     : ''
+  const conditionalResize = normalizeConditionalResize(currentOpt.conditionalResize, (message) => {
+    console.warn(`[renderer-image(dom)] ${message}`)
+  })
   const resizeOriginDataAttr = resizeDataAttr ? `${resizeDataAttr}-origin` : ''
   const outputSrcAttr = typeof currentOpt.previewOutputSrcAttr === 'string' && currentOpt.previewOutputSrcAttr.trim()
     ? currentOpt.previewOutputSrcAttr
@@ -511,6 +535,7 @@ export const createContext = async (markdownCont = '', option = {}, root = null)
     imgExtReg,
     resizeDataAttr,
     resizeOriginDataAttr,
+    conditionalResize,
     scaleSuffixDataAttr: defaultScaleSuffixDataAttr,
     outputSrcAttr,
     loadSrcResolver,
@@ -538,6 +563,7 @@ export const applyImageTransforms = async (root, contextOrOptions = {}, markdown
     imgExtReg,
     resizeDataAttr,
     resizeOriginDataAttr,
+    conditionalResize,
     scaleSuffixDataAttr,
     outputSrcAttr,
     loadSrcResolver,
@@ -639,7 +665,8 @@ export const applyImageTransforms = async (root, contextOrOptions = {}, markdown
           resizeEnabled,
           resizeTitleForSize,
           imageScale,
-          noUpscaleEnabled
+          noUpscaleEnabled,
+          conditionalResize
         )
         width = sized.width
         height = sized.height
@@ -967,28 +994,8 @@ export const applyImageTransforms = async (root, contextOrOptions = {}, markdown
     if (!managedSupplementalState) {
       managedSupplementalState = { decoding: false, loading: false }
     }
-    const syncManagedAttr = (attrName, enabled, expectedValue, stateKey) => {
-      const currentValue = getAttr(img, attrName)
-      if (enabled) {
-        if (!currentValue) {
-          setAttrIfChanged(img, attrName, expectedValue)
-          managedSupplementalState[stateKey] = true
-          return
-        }
-        if (managedSupplementalState[stateKey] && currentValue !== expectedValue) {
-          managedSupplementalState[stateKey] = false
-        }
-        return
-      }
-      if (managedSupplementalState[stateKey]) {
-        if (currentValue === expectedValue) {
-          removeAttrIfPresent(img, attrName)
-        }
-        managedSupplementalState[stateKey] = false
-      }
-    }
-    syncManagedAttr('decoding', asyncDecodeEnabled, 'async', 'decoding')
-    syncManagedAttr('loading', lazyLoadEnabled, 'lazy', 'loading')
+    syncManagedAttr(img, managedSupplementalState, 'decoding', asyncDecodeEnabled, 'async', 'decoding')
+    syncManagedAttr(img, managedSupplementalState, 'loading', lazyLoadEnabled, 'lazy', 'loading')
     if (managedSupplementalState.decoding || managedSupplementalState.loading) {
       managedSupplementalAttrsByImage.set(img, managedSupplementalState)
     } else {

@@ -4,7 +4,7 @@ import path from 'path'
 import mdit from 'markdown-it'
 import mditMeta from 'markdown-it-meta'
 import mditRendererImage from '../index.js'
-import { parseFrontmatter, normalizeRelativePath, getFrontmatter, classifyResizeHint, setImgSize } from '../script/img-util.js'
+import { parseFrontmatter, normalizeRelativePath, getFrontmatter, classifyResizeHint, normalizeConditionalResize, setImgSize } from '../script/img-util.js'
 
 let __dirname = path.dirname(new URL(import.meta.url).pathname)
 const isWindows = (process.platform === 'win32')
@@ -414,6 +414,60 @@ try {
   })
   assert.deepStrictEqual(setImgSize('cat_0dpi', { width: 800, height: 600 }, true, false, '', null, true), {
     width: 800,
+    height: 600,
+  })
+  assert.deepStrictEqual(normalizeConditionalResize({
+    orientation: 'portrait',
+    targetWidth: 300.4,
+  }), {
+    orientation: 'portrait',
+    minWidth: 0,
+    minHeight: 0,
+    targetWidth: 300,
+    targetHeight: 0,
+  })
+  assert.strictEqual(normalizeConditionalResize({
+    orientation: 'portrait',
+    targetWidth: 0.4,
+  }), null)
+  assert.deepStrictEqual(setImgSize('portrait.jpg', { width: 600, height: 1200 }, false, false, '', null, true, {
+    orientation: 'portrait',
+    minHeight: 560,
+    minWidth: 560,
+    targetWidth: 300,
+    targetHeight: 0,
+  }), {
+    width: 300,
+    height: 600,
+  })
+  assert.deepStrictEqual(setImgSize('portrait.jpg', { width: 600, height: 1200 }, false, true, 'resize:25%', null, true, {
+    orientation: 'portrait',
+    minHeight: 560,
+    minWidth: 560,
+    targetWidth: 250,
+    targetHeight: 0,
+  }), {
+    width: 150,
+    height: 300,
+  })
+  assert.deepStrictEqual(setImgSize('portrait.jpg', { width: 600, height: 1200 }, false, false, '', 0.5, true, {
+    orientation: 'portrait',
+    minHeight: 560,
+    minWidth: 560,
+    targetWidth: 250,
+    targetHeight: 0,
+  }), {
+    width: 300,
+    height: 600,
+  })
+  assert.deepStrictEqual(setImgSize('landscape.jpg', { width: 1200, height: 600 }, false, false, '', null, true, {
+    orientation: 'portrait',
+    minHeight: 560,
+    minWidth: 560,
+    targetWidth: 300,
+    targetHeight: 0,
+  }), {
+    width: 1200,
     height: 600,
   })
 } catch (e) {

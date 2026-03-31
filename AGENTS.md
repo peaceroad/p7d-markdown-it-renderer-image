@@ -1,7 +1,7 @@
 # markdown-it-renderer-image - Workflow Notes
 
 ## index.js (markdown-it plugin, Node)
-1. Initialize options (resolveSrc on by default, remote sizing on by default, cache, suppressErrors, outputUrlMode, urlImageBase).
+1. Initialize options (resolveSrc on by default, remote sizing on by default, cache, suppressErrors, outputUrlMode, urlImageBase, optional `conditionalResize`).
 2. Prepare extension regex (query/hash ignored).
 3. Use `md.core.ruler.after('replacements')` to walk inline tokens and process each `image` token (no renderer override).
    - Read `srcRaw`/`title`; split base + query/hash.
@@ -11,7 +11,7 @@
    - Set final `src`/`alt`/`title`. Emit effective resize metadata in `resizeDataAttr` (default `data-img-resize`); emit `${resizeDataAttr}-origin` only for `imagescale`-derived values. Title is removed only when `autoHideResizeTitle` + `resize` + resize-pattern match. Emit `data-img-scale-suffix` when filename scale suffix metadata is available. Optional `decoding`/`loading`.
    - If extension allowed: resolve path (remote vs local via mdPath, which can be a file path or a directory), warn once when mdPath missing, skip remote if `disableRemoteSize`.
    - Load dimensions via `image-size` (local) or `sync-fetch` + `image-size` (remote); protocol-relative remote URLs try `https:` first and `http:` second for measurement only. Respect `remoteMaxBytes` when content-length is present. Per-render cache; global sets de-duplicate errors/warnings. `cacheMax` 0 disables cache.
-   - Apply `setImgSize` (scaleSuffix, resize via title, imagescale, noUpscale always on) and set width/height.
+   - Apply `setImgSize` (scaleSuffix, resize via title, `imagescale`, optional `conditionalResize`, noUpscale always on) and set width/height.
 4. Frontmatter resolution and base URL are cached per render to avoid recompute.
 
 ## script/set-img-attributes.js (browser)
@@ -46,10 +46,12 @@
 - `data-img-resize` stores the effective resize value that contributed to sizing output. It may come from a title resize hint or from frontmatter `imagescale`.
 - `data-img-resize-origin` is emitted only when `data-img-resize` came from `imagescale`; title-derived resize metadata omits the origin attribute by default.
 - `data-img-scale-suffix` stores canonical filename scale suffix metadata such as `2x`, `300dpi`, or `300ppi`. Keep it separate from resize metadata because suffix scaling can combine with title resize or `imagescale`.
+- `conditionalResize` changes final width/height only; it does not emit resize metadata attributes by itself.
 - In DOM preview flows, `data-img-src-raw` keeps the original markdown `src` when `previewMode !== 'output'`, while `previewOutputSrcAttr` stores the rewritten output URL for inspection/use by preview integrations.
 
 ## Utilities (script/img-util.js)
 - Frontmatter parsing, path normalization, resize classification (`classifyResizeHint`), resize/scaleSuffix regexes, image base resolution, and size adjustment (`setImgSize`).
+- `conditionalResize` is a shared option-level size policy. It supports `orientation: 'portrait' | 'landscape'`, minimum width/height thresholds, and exactly one of `targetWidth` or `targetHeight`.
 - Frontmatter alias normalization accepts dotted keys first, nested object keys second, and legacy flat keys third; conflicts warn and invalid non-absolute `images.dirUrl` / `urlimage` values are ignored. Relative or empty `urlimage` values are not treated as subdirectory hints.
 - Frontmatter normalization removes only a leading `./` (not arbitrary single-character prefixes).
 - URL path extraction treats only `.html`, `.htm`, `.xhtml` as file names; other dotted segments are kept as directories.

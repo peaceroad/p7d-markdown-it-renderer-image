@@ -10,6 +10,7 @@ import {
   normalizeRelativePath,
   resolveImageBase,
   normalizeResizeValue,
+  normalizeConditionalResize,
   buildImageExtensionRegExp,
   getImageName,
   getScaleSuffixValue,
@@ -238,6 +239,9 @@ const mditRendererImage = (md, option) => {
   const remoteMaxBytes = opt.remoteMaxBytes
   const scaleSuffixEnabled = opt.scaleSuffix
   const noUpscale = opt.noUpscale
+  const conditionalResize = normalizeConditionalResize(opt.conditionalResize, (message) => {
+    console.warn(`[renderer-image] ${message}`)
+  })
   const resizeDataAttr = typeof opt.resizeDataAttr === 'string' && opt.resizeDataAttr.trim()
     ? opt.resizeDataAttr
     : ''
@@ -332,7 +336,7 @@ const mditRendererImage = (md, option) => {
         : emptyImgData
 
       if (imgData?.width !== undefined) {
-        const { width, height } = setImgSize(imgName, imgData, scaleSuffixEnabled, resizeEnabled, titleRaw, imageScale, noUpscale)
+        const { width, height } = setImgSize(imgName, imgData, scaleSuffixEnabled, resizeEnabled, titleRaw, imageScale, noUpscale, conditionalResize)
         token.attrSet('width', width)
         token.attrSet('height', height)
       }

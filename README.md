@@ -108,6 +108,7 @@ await runInPreview({
 
 - `scaleSuffix` (default: `false`): Scale by filename suffix (`@2x`, `300dpi`, `300ppi`).
 - `resize` (default: `false`): Resize by title hint (for example `resize:50%`, `resize:200px`).
+- `conditionalResize` (default: `null`): Fallback auto-resize policy applied only when neither title resize nor `images.scale` / `imagescale` is active. Example: `{ enabled: true, orientation: 'portrait', minHeight: 560, minWidth: 560, targetWidth: 300 }`.
 - `autoHideResizeTitle` (default: `true`): Remove title when it is a resize hint.
 - `resizeDataAttr` (default: `'data-img-resize'`): Store normalized effective resize metadata (`title` resize or `imagescale`). When enabled, `${resizeDataAttr}-origin` is also emitted for `imagescale`-derived values (`''` disables both).
 - `lazyLoad` (default: `false`): Add `loading="lazy"`.
@@ -120,6 +121,8 @@ await runInPreview({
 
 Notes:
 - Final size is always capped to original dimensions (no upscaling behavior).
+- `conditionalResize.orientation` accepts `portrait` or `landscape` and is evaluated from measured image dimensions (`height > width` or `width > height`).
+- `conditionalResize` requires exactly one of `targetWidth` or `targetHeight`.
 - `outputUrlMode: 'path-only'` assumes same-origin URL usage.
 
 ### Node-only
@@ -204,12 +207,15 @@ Order:
 2. Apply `scaleSuffix` (if enabled)
 3. Apply title resize (`resize`) if present
 4. Apply `imagescale` only when step 3 is not used
-5. Cap to original size (no upscaling)
+5. Apply `conditionalResize` only when steps 3 and 4 are not used
+6. Cap to original size (no upscaling)
 
 Metadata emitted to HTML:
 - `data-img-resize`: effective normalized resize value (`50%`, `320px`, ...)
 - `data-img-resize-origin`: emitted only for `imagescale`
 - `data-img-scale-suffix`: canonical filename suffix when `scaleSuffix` applies (`2x`, `300dpi`, `300ppi`)
+
+`conditionalResize` does not emit resize metadata attributes by itself; it only affects final `width` / `height`.
 
 ## DOM Probe Source Workflow
 
