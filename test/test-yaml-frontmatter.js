@@ -2,7 +2,7 @@ import assert from 'assert'
 import fs from 'fs'
 import path from 'path'
 import mdit from 'markdown-it'
-import mditMeta from 'markdown-it-meta'
+import mditFrontMatter from 'markdown-it-front-matter'
 import mditRendererImage from '../index.js'
 import { parseFrontmatter, normalizeRelativePath, getFrontmatter, classifyResizeHint, normalizeConditionalResize, setImgSize } from '../script/img-util.js'
 
@@ -15,7 +15,16 @@ if (isWindows) {
 
 const md = mdit().use(mditRendererImage, { scaleSuffix: true, resize: true })
 
-let mdMeta = mdit().use(mditMeta).use(mditRendererImage, {
+const createMdWithFrontMatterPlugin = (options = {}) => {
+  const mdInstance = mdit()
+  mdInstance.use(mditFrontMatter, (fm) => {
+    mdInstance.frontmatter = parseFrontmatter(`---\n${String(fm || '')}\n---`)
+  })
+  mdInstance.use(mditRendererImage, options)
+  return mdInstance
+}
+
+let mdWithFrontMatterPlugin = createMdWithFrontMatterPlugin({
   resolveSrc: true,
   scaleSuffix: true,
   resize: true,
@@ -23,7 +32,7 @@ let mdMeta = mdit().use(mditMeta).use(mditRendererImage, {
 })
 
 
-let mdMetaWithLidRelative = mdit().use(mditMeta).use(mditRendererImage, {
+let mdWithFrontMatterPluginLidRelative = createMdWithFrontMatterPlugin({
   resolveSrc: true,
   scaleSuffix: true,
   resize: true,
@@ -147,32 +156,32 @@ const runTest = (mdInstance, pat, pass, testId) => {
 }
 
 let pass = true
-pass = runTest(mdMeta, testData.noOption, pass)
-pass = runTest(mdMetaWithLidRelative, testData.withLidRelative, pass)
+pass = runTest(mdWithFrontMatterPlugin, testData.noOption, pass)
+pass = runTest(mdWithFrontMatterPluginLidRelative, testData.withLidRelative, pass)
 
 console.log('===========================================================')
-console.log('test-yaml-frontmatter.js - md.meta fallback safety')
+console.log('test-yaml-frontmatter.js - md.frontmatter fallback safety')
 try {
   const rawMetaMarkdown = `---
 url: https://example.com/article/number
 ---
 
 ![](cat.jpg)`
-  const hMetaFallback = mdMeta.render(rawMetaMarkdown)
-  assert.strictEqual(hMetaFallback, '<p><img src="https://example.com/article/number/cat.jpg" alt="" width="400" height="300"></p>\n')
+  const hMetaFallback = mdWithFrontMatterPlugin.render(rawMetaMarkdown)
+  assert.strictEqual(hMetaFallback, '\n<p><img src="https://example.com/article/number/cat.jpg" alt="" width="400" height="300"></p>\n')
 
-  const hMetaNoLeak = mdMeta.render('![](cat.jpg)')
+  const hMetaNoLeak = mdWithFrontMatterPlugin.render('![](cat.jpg)')
   assert.strictEqual(hMetaNoLeak, '<p><img src="cat.jpg" alt="" width="400" height="300"></p>\n')
 
-  const hEnvPriority = mdMeta.render(rawMetaMarkdown, {
+  const hEnvPriority = mdWithFrontMatterPlugin.render(rawMetaMarkdown, {
     frontmatter: {
       url: 'https://override.example.com/base/',
     },
   })
-  assert.strictEqual(hEnvPriority, '<p><img src="https://override.example.com/base/cat.jpg" alt="" width="400" height="300"></p>\n')
+  assert.strictEqual(hEnvPriority, '\n<p><img src="https://override.example.com/base/cat.jpg" alt="" width="400" height="300"></p>\n')
 } catch (e) {
   pass = false
-  console.log('incorrect(md.meta fallback safety): ')
+  console.log('incorrect(md.frontmatter fallback safety): ')
   console.log(e.message)
 }
 
