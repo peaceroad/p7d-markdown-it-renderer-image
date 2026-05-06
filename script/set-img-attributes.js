@@ -607,7 +607,6 @@ export const applyImageTransforms = async (root, contextOrOptions = {}, markdown
   const setDomSrc = currentOpt.setDomSrc
   const resizeEnabled = currentOpt.resize
   const scaleSuffixEnabled = currentOpt.scaleSuffix
-  const noUpscaleEnabled = currentOpt.noUpscale
   const autoHideResizeTitle = currentOpt.autoHideResizeTitle
   const asyncDecodeEnabled = currentOpt.asyncDecode
   const lazyLoadEnabled = currentOpt.lazyLoad
@@ -665,7 +664,7 @@ export const applyImageTransforms = async (root, contextOrOptions = {}, markdown
           resizeEnabled,
           resizeTitleForSize,
           imageScale,
-          noUpscaleEnabled,
+          true,
           conditionalResize
         )
         width = sized.width

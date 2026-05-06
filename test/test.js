@@ -19,6 +19,7 @@ const mdEnvPat = mdit().use(mditRendererImage, { ...commonOpt, mdPath: __dirname
 const mdHideDefault = mdit().use(mditRendererImage, { scaleSuffix: true, resize: true });
 const mdResizeDataAttr = mdit().use(mditRendererImage, { resize: true, resizeDataAttr: 'data-img-resize' });
 const mdNoUpscale = mdit().use(mditRendererImage, { resize: true });
+const mdNoUpscaleIgnored = mdit().use(mditRendererImage, { resize: true, noUpscale: false });
 
 const loadExamples = (file) => {
   const example = __dirname + '/' + file;
@@ -192,6 +193,7 @@ const hNoUpscale = mdNoUpscale.render('![Figure](cat.jpg "resize:200%")', {'mdPa
 const cNoUpscale = '<p><img src="cat.jpg" alt="Figure" width="400" height="300" data-img-resize="200%"></p>\n';
 try {
   assert.ok(htmlMatches(hNoUpscale, cNoUpscale));
+  assert.ok(htmlMatches(mdNoUpscaleIgnored.render('![Figure](cat.jpg "resize:200%")', {'mdPath': mdPat}), cNoUpscale));
 } catch(e) {
   pass = false
   console.log('incorrect(noUpscale): ');

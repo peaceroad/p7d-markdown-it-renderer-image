@@ -766,6 +766,13 @@ await runTest(28, 'noUpscale caps resize scaling', async () => {
   const img = images[0]
   assert.strictEqual(img.getAttribute('width'), '800')
   assert.strictEqual(img.getAttribute('height'), '600')
+
+  const optionOverrideImages = [
+    new MockElement('img', { src: 'cat.jpg', alt: 'cat', title: 'resize:200%' })
+  ]
+  await testSetImageAttributes(optionOverrideImages, { resize: true, noUpscale: false })
+  assert.strictEqual(optionOverrideImages[0].getAttribute('width'), '800')
+  assert.strictEqual(optionOverrideImages[0].getAttribute('height'), '600')
 })
 
 // Test 29: imagescale clamps above 100%

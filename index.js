@@ -238,7 +238,6 @@ const mditRendererImage = (md, option) => {
   const remoteTimeout = opt.remoteTimeout
   const remoteMaxBytes = opt.remoteMaxBytes
   const scaleSuffixEnabled = opt.scaleSuffix
-  const noUpscale = opt.noUpscale
   const conditionalResize = normalizeConditionalResize(opt.conditionalResize, (message) => {
     console.warn(`[renderer-image] ${message}`)
   })
@@ -246,7 +245,6 @@ const mditRendererImage = (md, option) => {
     ? opt.resizeDataAttr
     : ''
   const resizeOriginDataAttr = resizeDataAttr ? `${resizeDataAttr}-origin` : ''
-  const scaleSuffixDataAttr = defaultScaleSuffixDataAttr
 
   const removeTokenAttr = (token, name) => {
     const index = token.attrIndex(name)
@@ -301,10 +299,8 @@ const mditRendererImage = (md, option) => {
     if (isValidExt) {
       const imgName = getImageName(srcBase)
       const scaleSuffixValue = scaleSuffixEnabled ? getScaleSuffixValue(imgName) : ''
-      if (scaleSuffixDataAttr) {
-        if (scaleSuffixValue) token.attrSet(scaleSuffixDataAttr, scaleSuffixValue)
-        else removeTokenAttr(token, scaleSuffixDataAttr)
-      }
+      if (scaleSuffixValue) token.attrSet(defaultScaleSuffixDataAttr, scaleSuffixValue)
+      else removeTokenAttr(token, defaultScaleSuffixDataAttr)
       let srcPath = ''
       if (isRemote) {
         if (remoteSizeEnabled) {
@@ -336,12 +332,12 @@ const mditRendererImage = (md, option) => {
         : emptyImgData
 
       if (imgData?.width !== undefined) {
-        const { width, height } = setImgSize(imgName, imgData, scaleSuffixEnabled, resizeEnabled, titleRaw, imageScale, noUpscale, conditionalResize)
+        const { width, height } = setImgSize(imgName, imgData, scaleSuffixEnabled, resizeEnabled, titleRaw, imageScale, true, conditionalResize)
         token.attrSet('width', width)
         token.attrSet('height', height)
       }
-    } else if (scaleSuffixDataAttr) {
-      removeTokenAttr(token, scaleSuffixDataAttr)
+    } else {
+      removeTokenAttr(token, defaultScaleSuffixDataAttr)
     }
 
     token.attrSet('src', finalSrc)

@@ -6,6 +6,7 @@
 const defaultSharedOptions = Object.freeze({
   scaleSuffix: false, // scale by @2x or dpi/ppi suffix
   resize: false, // resize by title hint
+  conditionalResize: null, // conditional auto-resize policy after explicit resize/imageScale
   lazyLoad: false, // add loading="lazy"
   asyncDecode: false, // add decoding="async"
   checkImgExtensions: 'png,jpg,jpeg,gif,webp', // size only these extensions
@@ -14,7 +15,6 @@ const defaultSharedOptions = Object.freeze({
   outputUrlMode: 'absolute', // absolute | protocol-relative | path-only
   autoHideResizeTitle: true, // remove title when resize hint used
   resizeDataAttr: 'data-img-resize', // store effective resize metadata
-  noUpscale: true, // internal: prevent final size from exceeding original pixels
   suppressErrors: 'none', // 'none' | 'all' | 'local' | 'remote'
 })
 
@@ -75,6 +75,8 @@ const dotCharCode = 46
 const lowerRCharCode = 114
 const upperRCharCode = 82
 const katakanaRiCharCode = 12522
+const yamlFrontmatterFenceLf = '---\n'
+const yamlFrontmatterFenceCrLf = '---\r\n'
 
 const needsPathNormalization = (text) => {
   const len = text.length
@@ -110,6 +112,126 @@ const toText = (value) => {
   if (value instanceof String) return value.valueOf()
   return ''
 }
+const isRecordObject = (value) => !!value && typeof value === 'object' && !Array.isArray(value)
+const hasOwn = (value, key) => isRecordObject(value) && Object.prototype.hasOwnProperty.call(value, key)
+const parseFrontmatterScalar = (value) => {
+  const text = toText(value).trim()
+  if (!text) return ''
+  if ((text.startsWith('"') && text.endsWith('"')) ||
+      (text.startsWith("'") && text.endsWith("'"))) {
+    return text.slice(1, -1)
+  }
+  if (text === 'true') return true
+  if (text === 'false') return false
+  return text
+}
+const getDirectFrontmatterValue = (frontmatter, key) => {
+  if (!hasOwn(frontmatter, key)) return { present: false, value: undefined }
+  return { present: true, value: frontmatter[key] }
+}
+const getNestedFrontmatterValue = (frontmatter, path) => {
+  if (!isRecordObject(frontmatter) || !Array.isArray(path) || path.length === 0) {
+    return { present: false, value: undefined }
+  }
+  let current = frontmatter
+  const lastIndex = path.length - 1
+  for (let i = 0; i < lastIndex; i += 1) {
+    const segment = path[i]
+    if (!hasOwn(current, segment) || !isRecordObject(current[segment])) {
+      return { present: false, value: undefined }
+    }
+    current = current[segment]
+  }
+  const lastKey = path[lastIndex]
+  if (!hasOwn(current, lastKey)) return { present: false, value: undefined }
+  return { present: true, value: current[lastKey] }
+}
+const normalizeFrontmatterConflictValue = (value) => {
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value)
+  if (typeof value === 'boolean') return value ? 'true' : 'false'
+  return toText(value).trim().replace(/\\/g, '/')
+}
+const createDirectAlias = (label, key, meta = {}) => Object.freeze({
+  label,
+  ...meta,
+  get: (frontmatter) => getDirectFrontmatterValue(frontmatter, key),
+})
+const createNestedAlias = (label, path, meta = {}) => Object.freeze({
+  label,
+  ...meta,
+  get: (frontmatter) => getNestedFrontmatterValue(frontmatter, path),
+})
+const warnFrontmatterConflict = (fieldName, selectedLabel, sourceLabels, onWarning) => {
+  if (typeof onWarning !== 'function') return
+  const sources = sourceLabels.join(', ')
+  onWarning(`Conflicting frontmatter values for ${fieldName}. Using ${selectedLabel}. Sources: ${sources}`)
+}
+const resolveFrontmatterAlias = (frontmatter, fieldName, aliases, options = {}, acceptOverride = null) => {
+  const accept = typeof acceptOverride === 'function'
+    ? acceptOverride
+    : (typeof options.accept === 'function'
+    ? options.accept
+    : null)
+  const normalizeCompareValue = typeof options.normalizeCompareValue === 'function'
+    ? options.normalizeCompareValue
+    : normalizeFrontmatterConflictValue
+  let selected = null
+  let selectedCompareValue = ''
+  let sourceLabels = null
+  let hasConflict = false
+  for (const alias of aliases) {
+    const candidate = alias.get(frontmatter)
+    if (!candidate.present) continue
+    if (accept && !accept(candidate.value, alias)) continue
+    const compareValue = normalizeCompareValue(candidate.value)
+    if (!selected) {
+      selected = {
+        present: true,
+        value: candidate.value,
+        label: alias.label,
+      }
+      selectedCompareValue = compareValue
+      continue
+    }
+    if (!sourceLabels) sourceLabels = [selected.label]
+    sourceLabels.push(alias.label)
+    if (!hasConflict && compareValue !== selectedCompareValue) hasConflict = true
+  }
+  if (selected && hasConflict && sourceLabels) {
+    warnFrontmatterConflict(fieldName, selected.label, sourceLabels, options.onWarning)
+  }
+  return selected || { present: false, value: undefined, label: '' }
+}
+const urlFrontmatterAliases = Object.freeze([
+  createDirectAlias('page.url', 'page.url'),
+  createNestedAlias('page.url (nested)', ['page', 'url']),
+  createDirectAlias('url', 'url'),
+])
+const urlImageFrontmatterAliases = Object.freeze([
+  createDirectAlias('images.dirUrl', 'images.dirUrl', { absoluteOnly: true }),
+  createNestedAlias('images.dirUrl (nested)', ['images', 'dirUrl'], { absoluteOnly: true }),
+  createDirectAlias('urlimage', 'urlimage', { absoluteOnly: true }),
+])
+const urlImageBaseFrontmatterAliases = Object.freeze([
+  createDirectAlias('images.baseUrl', 'images.baseUrl'),
+  createNestedAlias('images.baseUrl (nested)', ['images', 'baseUrl']),
+  createDirectAlias('urlimagebase', 'urlimagebase'),
+])
+const stripLocalPrefixFrontmatterAliases = Object.freeze([
+  createDirectAlias('images.stripLocalPrefix', 'images.stripLocalPrefix'),
+  createNestedAlias('images.stripLocalPrefix (nested)', ['images', 'stripLocalPrefix']),
+  createDirectAlias('lid', 'lid'),
+])
+const localMarkdownDirFrontmatterAliases = Object.freeze([
+  createDirectAlias('local.markdownDir', 'local.markdownDir'),
+  createNestedAlias('local.markdownDir (nested)', ['local', 'markdownDir']),
+  createDirectAlias('lmd', 'lmd'),
+])
+const imageScaleFrontmatterAliases = Object.freeze([
+  createDirectAlias('images.scale', 'images.scale'),
+  createNestedAlias('images.scale (nested)', ['images', 'scale']),
+  createDirectAlias('imagescale', 'imagescale'),
+])
 const safeDecodeUri = (value) => {
   const text = toText(value)
   if (!text) return ''
@@ -280,26 +402,39 @@ const getImageName = (value) => {
 }
 
 const parseFrontmatter = (markdownCont) => {
-  if (typeof markdownCont !== 'string' || !markdownCont) return {}
-  const yamlMatch = markdownCont.match(yamlReg)
+  const text = toText(markdownCont)
+  if (!text) return {}
+  if (text !== '---' && !text.startsWith(yamlFrontmatterFenceLf) && !text.startsWith(yamlFrontmatterFenceCrLf)) {
+    return {}
+  }
+  const yamlMatch = text.match(yamlReg)
   if (!yamlMatch) return {}
   const yamlContent = yamlMatch[1]
   const result = {}
   const lines = yamlContent.split(/\r?\n/)
+  let currentSectionKey = ''
   for (const line of lines) {
-    const trimmedLine = line.trim()
+    const lineMatch = line.match(/^([ \t]*)(.*)$/)
+    const indentText = lineMatch ? lineMatch[1] : ''
+    const indentSize = indentText.replace(/\t/g, '  ').length
+    const trimmedLine = lineMatch ? lineMatch[2].trim() : line.trim()
     if (!trimmedLine || trimmedLine.startsWith('#')) continue
     const colonIndex = trimmedLine.indexOf(':')
     if (colonIndex === -1) continue
     const key = trimmedLine.substring(0, colonIndex).trim()
-    let value = trimmedLine.substring(colonIndex + 1).trim()
-    if ((value.startsWith('"') && value.endsWith('"')) || 
-        (value.startsWith("'") && value.endsWith("'"))) {
-      value = value.slice(1, -1)
+    const value = trimmedLine.substring(colonIndex + 1).trim()
+    if (indentSize > 0) {
+      if (!currentSectionKey || !isRecordObject(result[currentSectionKey])) continue
+      result[currentSectionKey][key] = parseFrontmatterScalar(value)
+      continue
     }
-    if (value === 'true') value = true
-    if (value === 'false') value = false
-    result[key] = value
+    currentSectionKey = ''
+    if (value === '') {
+      result[key] = {}
+      currentSectionKey = key
+      continue
+    }
+    result[key] = parseFrontmatterScalar(value)
   }
   return result
 }
@@ -369,6 +504,46 @@ const parseImageScale = (value) => {
   if (!Number.isFinite(numericValue) || numericValue <= 0) return null
   return Math.min(numericValue, 1)
 }
+const normalizeConditionalResizeNumber = (value, allowZero = false) => {
+  const numeric = Number(value)
+  if (!Number.isFinite(numeric)) return 0
+  if (allowZero) return numeric >= 0 ? numeric : 0
+  return numeric > 0 ? numeric : 0
+}
+const normalizeConditionalResizeTarget = (value) => {
+  const numeric = Math.round(Number(value))
+  return Number.isFinite(numeric) && numeric > 0 ? numeric : 0
+}
+const normalizeConditionalResize = (value, onWarning = null) => {
+  if (!isRecordObject(value)) return null
+  const warn = typeof onWarning === 'function' ? onWarning : null
+  if (hasOwn(value, 'enabled') && value.enabled === false) {
+    return null
+  }
+  const orientationRaw = toText(value.orientation).trim().toLowerCase()
+  const orientation = (orientationRaw === 'portrait' || orientationRaw === 'landscape')
+    ? orientationRaw
+    : ''
+  if (orientationRaw && !orientation) {
+    if (warn) warn(`Ignoring conditionalResize because orientation must be "portrait" or "landscape".`)
+    return null
+  }
+  const minWidth = normalizeConditionalResizeNumber(value.minWidth, true)
+  const minHeight = normalizeConditionalResizeNumber(value.minHeight, true)
+  const targetWidth = normalizeConditionalResizeTarget(value.targetWidth)
+  const targetHeight = normalizeConditionalResizeTarget(value.targetHeight)
+  if ((targetWidth > 0) === (targetHeight > 0)) {
+    if (warn) warn('Ignoring conditionalResize because exactly one of targetWidth or targetHeight is required.')
+    return null
+  }
+  return {
+    orientation,
+    minWidth,
+    minHeight,
+    targetWidth,
+    targetHeight,
+  }
+}
 const formatPercent = (value) => {
   if (!Number.isFinite(value) || value <= 0) return ''
   const rounded = Number(value.toFixed(6))
@@ -397,7 +572,7 @@ const getScaleSuffixValue = (imgName) => {
   return info ? info.value : ''
 }
 
-const setImgSize = (imgName, imgData, scaleSuffix, resize, title, imageScale, noUpscale) => {
+const setImgSize = (imgName, imgData, scaleSuffix, resize, title, imageScale, noUpscale, conditionalResize = null) => {
   if (!imgData) return {}
   const originalWidth = imgData.width
   const originalHeight = imgData.height
@@ -410,8 +585,7 @@ const setImgSize = (imgName, imgData, scaleSuffix, resize, title, imageScale, no
       if (unit === 'x') {
         w = Math.round(w / scale)
         h = Math.round(h / scale)
-      }
-      if (/[dp]pi/.test(unit)) {
+      } else if (/[dp]pi/.test(unit)) {
         w = Math.round(w * 96 / scale)
         h = Math.round(h * 96 / scale)
       }
@@ -422,15 +596,40 @@ const setImgSize = (imgName, imgData, scaleSuffix, resize, title, imageScale, no
     if (resizeInfo.unit === '%') {
       h = Math.round(h * resizeInfo.value / 100)
       w = Math.round(w * resizeInfo.value / 100)
-    }
-    if (resizeInfo.unit === 'px') {
+    } else if (resizeInfo.unit === 'px') {
       h = Math.round(h * resizeInfo.value / w)
       w = Math.round(resizeInfo.value)
     }
   }
-  if (!resizeInfo && imageScale && Number.isFinite(imageScale)) {
+  const hasExplicitResize = !!resizeInfo
+  const hasExplicitImageScale = !hasExplicitResize && Number.isFinite(imageScale) && imageScale > 0
+  if (hasExplicitImageScale) {
     w = Math.round(w * imageScale)
     h = Math.round(h * imageScale)
+  }
+  if (!hasExplicitResize && !hasExplicitImageScale && conditionalResize) {
+    const {
+      orientation = '',
+      minWidth = 0,
+      minHeight = 0,
+      targetWidth = 0,
+      targetHeight = 0,
+    } = conditionalResize
+    const matchesOrientation = !orientation
+      || (orientation === 'portrait' ? h > w : w > h)
+    const matchesMinWidth = !(minWidth > 0) || w >= minWidth
+    const matchesMinHeight = !(minHeight > 0) || h >= minHeight
+    if (matchesOrientation && matchesMinWidth && matchesMinHeight) {
+      if (targetWidth > 0 && w > 0) {
+        const scale = targetWidth / w
+        w = targetWidth
+        h = Math.round(h * scale)
+      } else if (targetHeight > 0 && h > 0) {
+        const scale = targetHeight / h
+        h = targetHeight
+        w = Math.round(w * scale)
+      }
+    }
   }
   if (noUpscale && Number.isFinite(originalWidth) && Number.isFinite(originalHeight) && w > 0 && h > 0) {
     const limitScale = Math.min(1, originalWidth / w, originalHeight / h)
@@ -442,49 +641,53 @@ const setImgSize = (imgName, imgData, scaleSuffix, resize, title, imageScale, no
   return { width: w, height: h }
 }
 
-const getFrontmatter = (frontmatter) => {
-  if (!frontmatter || typeof frontmatter !== 'object' || Array.isArray(frontmatter)) return null
+const getFrontmatter = (frontmatter, option = {}) => {
+  if (!isRecordObject(frontmatter)) return null
 
-  let lid = toText(frontmatter.lid)
+  const warn = (message) => {
+    if (typeof option.onWarning === 'function') option.onWarning(message)
+  }
+  const acceptAbsoluteOnlyAlias = (value, alias) => {
+    if (!alias.absoluteOnly) return true
+    const text = toText(value).trim()
+    if (text && isAbsoluteUrl(text)) return true
+    warn(`Ignoring ${alias.label} because it must be an absolute URL.`)
+    return false
+  }
+
+  const resolvedLid = resolveFrontmatterAlias(frontmatter, 'images.stripLocalPrefix', stripLocalPrefixFrontmatterAliases, option)
+  const resolvedUrl = resolveFrontmatterAlias(frontmatter, 'page.url', urlFrontmatterAliases, option)
+  const resolvedUrlImage = resolveFrontmatterAlias(frontmatter, 'images.dirUrl', urlImageFrontmatterAliases, option, acceptAbsoluteOnlyAlias)
+  const resolvedUrlImageBase = resolveFrontmatterAlias(frontmatter, 'images.baseUrl', urlImageBaseFrontmatterAliases, option)
+  const resolvedLmd = resolveFrontmatterAlias(frontmatter, 'local.markdownDir', localMarkdownDirFrontmatterAliases, option)
+  const resolvedImageScale = resolveFrontmatterAlias(frontmatter, 'images.scale', imageScaleFrontmatterAliases, option)
+
+  let lid = toText(resolvedLid.value)
   if (lid) lid = lid.replace(/\\/g, '/')
   if (lid) {
     if (!/\/$/.test(lid)) lid += '/'
     if (/^\.\//.test(lid)) lid = lid.replace(/^\.\//, '')
   }
-  let url = toText(frontmatter.url)
+  let url = toText(resolvedUrl.value)
   if (url) {
     if (!url.endsWith('/')) url += '/'
   }
-  const hasUrlImageKey = Object.prototype.hasOwnProperty.call(frontmatter, 'urlimage')
-  let urlimage = toText(frontmatter.urlimage)
-  let imageDir = ''
-  let hasImageDir = false
-  const urlimageIsAbsolute = urlimage ? isAbsoluteUrl(urlimage) : false
-  if (urlimage && urlimageIsAbsolute) {
+  let urlimage = toText(resolvedUrlImage.value)
+  if (urlimage) {
     if (!urlimage.endsWith('/')) urlimage += '/'
-  } else if (hasUrlImageKey) {
-    hasImageDir = true
-    imageDir = urlimage
-    urlimage = ''
   }
-  let urlimagebase = toText(frontmatter.urlimagebase)
+  let urlimagebase = toText(resolvedUrlImageBase.value)
   if (urlimagebase) {
     if (!urlimagebase.endsWith('/')) urlimagebase += '/'
   }
-  if (imageDir === '.' || imageDir === './') imageDir = ''
-  if (imageDir) {
-    if (!/\/$/.test(imageDir)) imageDir += '/'
-    if (/^\.\//.test(imageDir)) imageDir = imageDir.replace(/^\.\//, '')
-    imageDir = imageDir.replace(/^\/+/, '')
-  }
-  let lmd = toText(frontmatter.lmd)
+  let lmd = toText(resolvedLmd.value)
   if (lmd) lmd = lmd.replace(/\\/g, '/')
   if (lmd) {
     if (!/\/$/.test(lmd)) lmd += '/'
   }
-  const imageScale = parseImageScale(frontmatter.imagescale)
-  const imageScaleResizeValue = getImageScaleResizeValue(frontmatter.imagescale)
-  return { url, urlimage, urlimagebase, lid, imageDir, hasImageDir, lmd, imageScale, imageScaleResizeValue }
+  const imageScale = parseImageScale(resolvedImageScale.value)
+  const imageScaleResizeValue = getImageScaleResizeValue(resolvedImageScale.value)
+  return { url, urlimage, urlimagebase, lid, lmd, imageScale, imageScaleResizeValue }
 }
 
 const resolveImageBase = (frontmatter) => {
@@ -546,6 +749,26 @@ const removeAttrIfPresent = (element, name) => {
   if (!hasAttr(element, name)) return
   element.removeAttribute(name)
 }
+const syncManagedAttr = (img, managedState, attrName, enabled, expectedValue, stateKey) => {
+  const currentValue = getAttr(img, attrName)
+  if (enabled) {
+    if (!currentValue) {
+      setAttrIfChanged(img, attrName, expectedValue)
+      managedState[stateKey] = true
+      return
+    }
+    if (managedState[stateKey] && currentValue !== expectedValue) {
+      managedState[stateKey] = false
+    }
+    return
+  }
+  if (managedState[stateKey]) {
+    if (currentValue === expectedValue) {
+      removeAttrIfPresent(img, attrName)
+    }
+    managedState[stateKey] = false
+  }
+}
 const parseJsonSafe = (value) => {
   try {
     return JSON.parse(value)
@@ -563,6 +786,7 @@ const probeCacheByOwner = new WeakMap()
 const resizeHintStateByImage = new WeakMap()
 const managedSupplementalAttrsByImage = new WeakMap()
 const autoHiddenResizeTitleByImage = new WeakMap()
+const managedDisplaySrcByImage = new WeakMap()
 const createSummary = (total = 0) => ({
   total,
   processed: 0,
@@ -796,7 +1020,6 @@ const sharedContextUtils = Object.freeze({
   hasUrlScheme,
   hasSpecialScheme,
   stripQueryHash,
-  getBasename,
   getImageName,
   applyOutputUrlMode,
 })
@@ -838,9 +1061,24 @@ const rendererFunctionOptionKeys = Object.freeze([
 const rendererObjectOptionKeys = Object.freeze([
   'loadSrcMap',
   'loadSrcPrefixMap',
+  'conditionalResize',
 ])
 const rendererArrayOptionKeys = Object.freeze([
   'observeAttributeFilter',
+])
+const isBooleanOption = (value) => typeof value === 'boolean'
+const isStringOption = (value) => typeof value === 'string'
+const isNumberOption = (value) => Number.isFinite(value)
+const isFunctionOption = (value) => typeof value === 'function'
+const isObjectOption = (value) => value && typeof value === 'object' && !Array.isArray(value)
+const isArrayOption = (value) => Array.isArray(value)
+const rendererOptionSpecs = Object.freeze([
+  [rendererBooleanOptionKeys, isBooleanOption],
+  [rendererStringOptionKeys, isStringOption],
+  [rendererNumberOptionKeys, isNumberOption],
+  [rendererFunctionOptionKeys, isFunctionOption],
+  [rendererObjectOptionKeys, isObjectOption],
+  [rendererArrayOptionKeys, isArrayOption],
 ])
 const applyTypedRendererOptions = (targetOpt, rendererSettings, optionOverrides, keys, isValidValue) => {
   for (const key of keys) {
@@ -851,28 +1089,18 @@ const applyTypedRendererOptions = (targetOpt, rendererSettings, optionOverrides,
 }
 const applyRendererOptions = (targetOpt, rendererSettings, optionOverrides) => {
   if (!rendererSettings || typeof rendererSettings !== 'object') return
-  applyTypedRendererOptions(targetOpt, rendererSettings, optionOverrides, rendererBooleanOptionKeys, (value) => typeof value === 'boolean')
-  applyTypedRendererOptions(targetOpt, rendererSettings, optionOverrides, rendererStringOptionKeys, (value) => typeof value === 'string')
-  applyTypedRendererOptions(targetOpt, rendererSettings, optionOverrides, rendererNumberOptionKeys, (value) => Number.isFinite(value))
-  applyTypedRendererOptions(targetOpt, rendererSettings, optionOverrides, rendererFunctionOptionKeys, (value) => typeof value === 'function')
-  applyTypedRendererOptions(
-    targetOpt,
-    rendererSettings,
-    optionOverrides,
-    rendererObjectOptionKeys,
-    (value) => value && typeof value === 'object' && !Array.isArray(value)
-  )
-  applyTypedRendererOptions(targetOpt, rendererSettings, optionOverrides, rendererArrayOptionKeys, (value) => Array.isArray(value))
+  for (const [keys, isValidValue] of rendererOptionSpecs) {
+    applyTypedRendererOptions(targetOpt, rendererSettings, optionOverrides, keys, isValidValue)
+  }
 }
 
 const createContext = async (markdownCont = '', option = {}, root = null) => {
   const opt = { ...defaultDomOptions }
   const safeOption = option && typeof option === 'object' ? { ...option } : null
-  const seedOption = safeOption ? { ...safeOption } : {}
   if (safeOption && Object.prototype.hasOwnProperty.call(safeOption, 'noUpscale')) {
     delete safeOption.noUpscale
-    delete seedOption.noUpscale
   }
+  const seedOption = safeOption || {}
   if (safeOption) Object.assign(opt, safeOption)
   const optionOverrides = new Set(safeOption ? Object.keys(safeOption) : [])
 
@@ -906,7 +1134,7 @@ const createContext = async (markdownCont = '', option = {}, root = null) => {
     }
   }
 
-  const currentOpt = { ...opt }
+  const currentOpt = opt
   const suppressErrorsOverridden = optionOverrides.has('suppressErrors')
     || (extensionSettings?.rendererImage
       && Object.prototype.hasOwnProperty.call(extensionSettings.rendererImage, 'suppressErrors'))
@@ -954,8 +1182,10 @@ const createContext = async (markdownCont = '', option = {}, root = null) => {
   }
   const resolveSrcEnabled = currentOpt.resolveSrc
 
-  const resolvedFrontmatter = getFrontmatter(frontmatter) || {}
-  const { url, urlimage, urlimagebase, lid, lmd, imageDir, hasImageDir, imageScale, imageScaleResizeValue } = resolvedFrontmatter
+  const resolvedFrontmatter = getFrontmatter(frontmatter, {
+    onWarning: (message) => console.warn(`[renderer-image(dom)] ${message}`),
+  }) || {}
+  const { url, urlimage, urlimagebase, lid, lmd, imageScale, imageScaleResizeValue } = resolvedFrontmatter
   const imageBase = resolveSrcEnabled
     ? resolveImageBase({
       url,
@@ -979,6 +1209,9 @@ const createContext = async (markdownCont = '', option = {}, root = null) => {
   const resizeDataAttr = typeof currentOpt.resizeDataAttr === 'string' && currentOpt.resizeDataAttr.trim()
     ? currentOpt.resizeDataAttr
     : ''
+  const conditionalResize = normalizeConditionalResize(currentOpt.conditionalResize, (message) => {
+    console.warn(`[renderer-image(dom)] ${message}`)
+  })
   const resizeOriginDataAttr = resizeDataAttr ? `${resizeDataAttr}-origin` : ''
   const outputSrcAttr = typeof currentOpt.previewOutputSrcAttr === 'string' && currentOpt.previewOutputSrcAttr.trim()
     ? currentOpt.previewOutputSrcAttr
@@ -1002,13 +1235,12 @@ const createContext = async (markdownCont = '', option = {}, root = null) => {
     imgExtReg,
     resizeDataAttr,
     resizeOriginDataAttr,
+    conditionalResize,
     scaleSuffixDataAttr: defaultScaleSuffixDataAttr,
     outputSrcAttr,
     loadSrcResolver,
     loadSrcMap,
     loadSrcPrefixEntries,
-    imageDir,
-    hasImageDir,
     imageScale,
     imageScaleResizeValue,
     onImageProcessed,
@@ -1031,13 +1263,12 @@ const applyImageTransforms = async (root, contextOrOptions = {}, markdownCont = 
     imgExtReg,
     resizeDataAttr,
     resizeOriginDataAttr,
+    conditionalResize,
     scaleSuffixDataAttr,
     outputSrcAttr,
     loadSrcResolver,
     loadSrcMap,
     loadSrcPrefixEntries,
-    imageDir,
-    hasImageDir,
     imageScale,
     imageScaleResizeValue,
     onImageProcessed,
@@ -1053,7 +1284,6 @@ const applyImageTransforms = async (root, contextOrOptions = {}, markdownCont = 
     isFileUrl,
     hasSpecialScheme,
     stripQueryHash,
-    getBasename,
     getImageName,
     applyOutputUrlMode,
   } = utils
@@ -1071,13 +1301,12 @@ const applyImageTransforms = async (root, contextOrOptions = {}, markdownCont = 
   const resolveSrcEnabled = currentOpt.resolveSrc
   const outputUrlMode = currentOpt.outputUrlMode
   const previewMode = currentOpt.previewMode
-  const usesStoredOriginalSrc = previewMode !== 'output'
+  const usesStoredOriginalSrc = previewMode !== 'output' && currentOpt.setDomSrc
   const loadSrcStrategy = currentOpt.loadSrcStrategy
   const hasLoadSrcPrefixMap = loadSrcPrefixEntries.length > 0
   const setDomSrc = currentOpt.setDomSrc
   const resizeEnabled = currentOpt.resize
   const scaleSuffixEnabled = currentOpt.scaleSuffix
-  const noUpscaleEnabled = currentOpt.noUpscale
   const autoHideResizeTitle = currentOpt.autoHideResizeTitle
   const asyncDecodeEnabled = currentOpt.asyncDecode
   const lazyLoadEnabled = currentOpt.lazyLoad
@@ -1135,7 +1364,8 @@ const applyImageTransforms = async (root, contextOrOptions = {}, markdownCont = 
           resizeEnabled,
           resizeTitleForSize,
           imageScale,
-          noUpscaleEnabled
+          true,
+          conditionalResize
         )
         width = sized.width
         height = sized.height
@@ -1263,9 +1493,11 @@ const applyImageTransforms = async (root, contextOrOptions = {}, markdownCont = 
     }
     summary.processed += 1
 
+    const currentSrcAttr = getAttr(img, 'src')
     const storedOriginalSrc = usesStoredOriginalSrc ? getAttr(img, originalSrcAttr) : ''
-    const useStored = usesStoredOriginalSrc && storedOriginalSrc
-    const srcRaw = useStored ? storedOriginalSrc : getAttr(img, 'src')
+    const managedDisplaySrc = usesStoredOriginalSrc ? (managedDisplaySrcByImage.get(img) || '') : ''
+    const useStored = usesStoredOriginalSrc && storedOriginalSrc && managedDisplaySrc === currentSrcAttr
+    const srcRaw = useStored ? storedOriginalSrc : currentSrcAttr
     const srcBase = stripQueryHash(srcRaw)
     const srcSuffix = srcRaw.slice(srcBase.length)
     const isLocalSrc = !isHttpUrl(srcRaw)
@@ -1290,10 +1522,6 @@ const applyImageTransforms = async (root, contextOrOptions = {}, markdownCont = 
 
         let nextSrc = localNormalized
         if (imageBase && !localNormalized.startsWith('/')) {
-          if (hasImageDir) {
-            nextSrc = getBasename(nextSrc)
-            if (imageDir) nextSrc = `${imageDir}${nextSrc}`
-          }
           nextSrc = `${imageBase}${nextSrc}`
         }
         src = normalizeRelativePath(nextSrc)
@@ -1345,15 +1573,20 @@ const applyImageTransforms = async (root, contextOrOptions = {}, markdownCont = 
     }
 
     if (previewMode !== 'output') {
-      if (!storedOriginalSrc && srcRaw) setAttrIfChanged(img, originalSrcAttr, srcRaw)
+      if (srcRaw) setAttrIfChanged(img, originalSrcAttr, srcRaw)
       if (outputSrcAttr && finalSrc) setAttrIfChanged(img, outputSrcAttr, finalSrc)
     } else {
       removeAttrIfPresent(img, originalSrcAttr)
       if (outputSrcAttr) removeAttrIfPresent(img, outputSrcAttr)
+      managedDisplaySrcByImage.delete(img)
     }
 
     if (setDomSrc) {
       setAttrIfChanged(img, 'src', displaySrc)
+      if (previewMode !== 'output') managedDisplaySrcByImage.set(img, displaySrc)
+      else managedDisplaySrcByImage.delete(img)
+    } else {
+      managedDisplaySrcByImage.delete(img)
     }
 
     const previousResizeHintStateInfo = tracksResizeHintState
@@ -1460,28 +1693,8 @@ const applyImageTransforms = async (root, contextOrOptions = {}, markdownCont = 
     if (!managedSupplementalState) {
       managedSupplementalState = { decoding: false, loading: false }
     }
-    const syncManagedAttr = (attrName, enabled, expectedValue, stateKey) => {
-      const currentValue = getAttr(img, attrName)
-      if (enabled) {
-        if (!currentValue) {
-          setAttrIfChanged(img, attrName, expectedValue)
-          managedSupplementalState[stateKey] = true
-          return
-        }
-        if (managedSupplementalState[stateKey] && currentValue !== expectedValue) {
-          managedSupplementalState[stateKey] = false
-        }
-        return
-      }
-      if (managedSupplementalState[stateKey]) {
-        if (currentValue === expectedValue) {
-          removeAttrIfPresent(img, attrName)
-        }
-        managedSupplementalState[stateKey] = false
-      }
-    }
-    syncManagedAttr('decoding', asyncDecodeEnabled, 'async', 'decoding')
-    syncManagedAttr('loading', lazyLoadEnabled, 'lazy', 'loading')
+    syncManagedAttr(img, managedSupplementalState, 'decoding', asyncDecodeEnabled, 'async', 'decoding')
+    syncManagedAttr(img, managedSupplementalState, 'loading', lazyLoadEnabled, 'lazy', 'loading')
     if (managedSupplementalState.decoding || managedSupplementalState.loading) {
       managedSupplementalAttrsByImage.set(img, managedSupplementalState)
     } else {
