@@ -11,6 +11,7 @@ import {
   resolveImageBase,
   normalizeResizeValue,
   normalizeConditionalResize,
+  normalizeOutputUrlMode,
   buildImageExtensionRegExp,
   getImageName,
   getScaleSuffixValue,
@@ -63,7 +64,11 @@ const getRemoteImgData = (src, timeout, remoteMaxBytes) => {
         return { type: 'too-large', contentLength }
       }
       try {
-        return { type: 'success', data: imageSize(response.buffer()) }
+        const buffer = response.buffer()
+        if (remoteMaxBytes && buffer.length > remoteMaxBytes) {
+          return { type: 'too-large', contentLength: buffer.length }
+        }
+        return { type: 'success', data: imageSize(buffer) }
       } catch {
         lastFailure = { type: 'decode' }
       }
@@ -98,6 +103,13 @@ const setCache = (cache, key, value, maxEntries) => {
     const firstKey = cache.keys().next().value
     cache.delete(firstKey)
   }
+}
+const normalizeNonNegativeNumberOption = (value, fallback, name, integer = false) => {
+  if (Number.isFinite(value) && value >= 0) {
+    return integer ? Math.floor(value) : value
+  }
+  console.warn(`[renderer-image] Invalid ${name} value: ${value}. Using ${fallback}.`)
+  return fallback
 }
 const hasOwnEnumerableKeys = (value) => {
   if (!value || typeof value !== 'object') return false
@@ -210,7 +222,7 @@ const mditRendererImage = (md, option) => {
   const opt = { ...defaultNodeOptions }
   const safeOption = option && typeof option === 'object' ? { ...option } : null
   if (safeOption && Object.prototype.hasOwnProperty.call(safeOption, 'noUpscale')) {
-    delete safeOption.noUpscale
+    throw new Error('[renderer-image] noUpscale option was removed. Image sizes are always capped to intrinsic dimensions.')
   }
   if (safeOption) Object.assign(opt, safeOption)
 
@@ -218,6 +230,12 @@ const mditRendererImage = (md, option) => {
     console.warn(`[renderer-image] Invalid suppressErrors value: ${opt.suppressErrors}. Using 'none'.`)
     opt.suppressErrors = 'none'
   }
+  opt.outputUrlMode = normalizeOutputUrlMode(opt.outputUrlMode, (message) => {
+    console.warn(`[renderer-image] ${message}`)
+  })
+  opt.cacheMax = normalizeNonNegativeNumberOption(opt.cacheMax, defaultNodeOptions.cacheMax, 'cacheMax', true)
+  opt.remoteTimeout = normalizeNonNegativeNumberOption(opt.remoteTimeout, defaultNodeOptions.remoteTimeout, 'remoteTimeout')
+  opt.remoteMaxBytes = normalizeNonNegativeNumberOption(opt.remoteMaxBytes, defaultNodeOptions.remoteMaxBytes, 'remoteMaxBytes')
 
   const imgExtReg = buildImageExtensionRegExp(opt.checkImgExtensions)
   const remoteSizeEnabled = !opt.disableRemoteSize
@@ -332,7 +350,7 @@ const mditRendererImage = (md, option) => {
         : emptyImgData
 
       if (imgData?.width !== undefined) {
-        const { width, height } = setImgSize(imgName, imgData, scaleSuffixEnabled, resizeEnabled, titleRaw, imageScale, true, conditionalResize)
+        const { width, height } = setImgSize(imgName, imgData, scaleSuffixEnabled, resizeEnabled, titleRaw, imageScale, conditionalResize)
         token.attrSet('width', width)
         token.attrSet('height', height)
       }

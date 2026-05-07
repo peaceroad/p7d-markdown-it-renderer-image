@@ -7,6 +7,7 @@ import {
   normalizeResizeValue,
   classifyResizeHint,
   normalizeConditionalResize,
+  normalizeOutputUrlMode,
   resizeValueReg,
   buildImageExtensionRegExp,
   getScaleSuffixValue,
@@ -75,6 +76,9 @@ const parseJsonSafe = (value) => {
   } catch {
     return null
   }
+}
+const failRemovedNoUpscaleOption = () => {
+  throw new Error('[renderer-image(dom)] noUpscale option was removed. Image sizes are always capped to intrinsic dimensions.')
 }
 const originalSrcAttr = 'data-img-src-raw'
 const defaultScaleSuffixDataAttr = 'data-img-scale-suffix'
@@ -398,7 +402,7 @@ export const createContext = async (markdownCont = '', option = {}, root = null)
   const opt = { ...defaultDomOptions }
   const safeOption = option && typeof option === 'object' ? { ...option } : null
   if (safeOption && Object.prototype.hasOwnProperty.call(safeOption, 'noUpscale')) {
-    delete safeOption.noUpscale
+    failRemovedNoUpscaleOption()
   }
   const seedOption = safeOption || {}
   if (safeOption) Object.assign(opt, safeOption)
@@ -446,6 +450,9 @@ export const createContext = async (markdownCont = '', option = {}, root = null)
       return { skip: true, opt: currentOpt }
     }
     if (extensionSettings.rendererImage) {
+      if (Object.prototype.hasOwnProperty.call(extensionSettings.rendererImage, 'noUpscale')) {
+        failRemovedNoUpscaleOption()
+      }
       applyRendererOptions(currentOpt, extensionSettings.rendererImage, optionOverrides)
     }
   }
@@ -453,6 +460,9 @@ export const createContext = async (markdownCont = '', option = {}, root = null)
     console.warn(`[renderer-image(dom)] Invalid suppressErrors value: ${currentOpt.suppressErrors}. Using 'none'.`)
     currentOpt.suppressErrors = 'none'
   }
+  currentOpt.outputUrlMode = normalizeOutputUrlMode(currentOpt.outputUrlMode, (message) => {
+    console.warn(`[renderer-image(dom)] ${message}`)
+  })
   const isFileProtocol = typeof location !== 'undefined' && location && location.protocol === 'file:'
   if (!suppressErrorsOverridden && isFileProtocol && currentOpt.suppressErrors === 'none') {
     currentOpt.suppressErrors = 'local'
@@ -664,7 +674,6 @@ export const applyImageTransforms = async (root, contextOrOptions = {}, markdown
           resizeEnabled,
           resizeTitleForSize,
           imageScale,
-          true,
           conditionalResize
         )
         width = sized.width

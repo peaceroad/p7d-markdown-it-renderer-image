@@ -253,6 +253,27 @@ try {
   const hPathOnly = mdPathOnly.render('![Alt](cat.jpg)', envUrlImage)
   assert.strictEqual(hPathOnly, '<p><img src="/assets/cat.jpg" alt="Alt" width="400" height="300"></p>\n')
 
+  const mdInvalidOutputMode = mdit().use(mditRendererImage, {
+    resolveSrc: true,
+    disableRemoteSize: true,
+    suppressErrors: 'local',
+    outputUrlMode: 'invalid-mode',
+    mdPath: __dirname + path.sep + 'examples-yaml-frontmatter.md',
+  })
+  const hInvalidOutputMode = mdInvalidOutputMode.render('![Alt](cat.jpg)', envUrlImage)
+  assert.strictEqual(hInvalidOutputMode, '<p><img src="https://image.example.com/assets/cat.jpg" alt="Alt" width="400" height="300"></p>\n')
+
+  const mdInvalidNumericOptions = mdit().use(mditRendererImage, {
+    resolveSrc: true,
+    suppressErrors: 'local',
+    cacheMax: -1,
+    remoteTimeout: -1,
+    remoteMaxBytes: -1,
+    mdPath: __dirname + path.sep + 'examples-yaml-frontmatter.md',
+  })
+  const hInvalidNumericOptions = mdInvalidNumericOptions.render('![Alt](cat.jpg)', {})
+  assert.strictEqual(hInvalidNumericOptions, '<p><img src="cat.jpg" alt="Alt" width="400" height="300"></p>\n')
+
   const envImageScale = {
     frontmatter: {
       imagescale: '50%',
@@ -417,11 +438,11 @@ try {
     state: 'invalid',
     normalizedResizeValue: '',
   })
-  assert.deepStrictEqual(setImgSize('cat@0x', { width: 800, height: 600 }, true, false, '', null, true), {
+  assert.deepStrictEqual(setImgSize('cat@0x', { width: 800, height: 600 }, true, false, '', null), {
     width: 800,
     height: 600,
   })
-  assert.deepStrictEqual(setImgSize('cat_0dpi', { width: 800, height: 600 }, true, false, '', null, true), {
+  assert.deepStrictEqual(setImgSize('cat_0dpi', { width: 800, height: 600 }, true, false, '', null), {
     width: 800,
     height: 600,
   })
@@ -439,7 +460,7 @@ try {
     orientation: 'portrait',
     targetWidth: 0.4,
   }), null)
-  assert.deepStrictEqual(setImgSize('portrait.jpg', { width: 600, height: 1200 }, false, false, '', null, true, {
+  assert.deepStrictEqual(setImgSize('portrait.jpg', { width: 600, height: 1200 }, false, false, '', null, {
     orientation: 'portrait',
     minHeight: 560,
     minWidth: 560,
@@ -449,7 +470,7 @@ try {
     width: 300,
     height: 600,
   })
-  assert.deepStrictEqual(setImgSize('portrait.jpg', { width: 600, height: 1200 }, false, true, 'resize:25%', null, true, {
+  assert.deepStrictEqual(setImgSize('portrait.jpg', { width: 600, height: 1200 }, false, true, 'resize:25%', null, {
     orientation: 'portrait',
     minHeight: 560,
     minWidth: 560,
@@ -459,7 +480,7 @@ try {
     width: 150,
     height: 300,
   })
-  assert.deepStrictEqual(setImgSize('portrait.jpg', { width: 600, height: 1200 }, false, false, '', 0.5, true, {
+  assert.deepStrictEqual(setImgSize('portrait.jpg', { width: 600, height: 1200 }, false, false, '', 0.5, {
     orientation: 'portrait',
     minHeight: 560,
     minWidth: 560,
@@ -469,7 +490,7 @@ try {
     width: 300,
     height: 600,
   })
-  assert.deepStrictEqual(setImgSize('landscape.jpg', { width: 1200, height: 600 }, false, false, '', null, true, {
+  assert.deepStrictEqual(setImgSize('landscape.jpg', { width: 1200, height: 600 }, false, false, '', null, {
     orientation: 'portrait',
     minHeight: 560,
     minWidth: 560,

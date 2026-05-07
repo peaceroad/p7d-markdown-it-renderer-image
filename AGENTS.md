@@ -10,7 +10,7 @@
    - Apply `outputUrlMode` to final URL.
    - Set final `src`/`alt`/`title`. Emit effective resize metadata in `resizeDataAttr` (default `data-img-resize`); emit `${resizeDataAttr}-origin` only for `imagescale`-derived values. Title is removed only when `autoHideResizeTitle` + `resize` + resize-pattern match. Emit `data-img-scale-suffix` when filename scale suffix metadata is available. Optional `decoding`/`loading`.
    - If extension allowed: resolve path (remote vs local via mdPath, which can be a file path or a directory), warn once when mdPath missing, skip remote if `disableRemoteSize`.
-   - Load dimensions via `image-size` (local) or `sync-fetch` + `image-size` (remote); protocol-relative remote URLs try `https:` first and `http:` second for measurement only. Respect `remoteMaxBytes` when content-length is present. Per-render cache; global sets de-duplicate errors/warnings. `cacheMax` 0 disables cache.
+   - Load dimensions via `image-size` (local) or `sync-fetch` + `image-size` (remote); protocol-relative remote URLs try `https:` first and `http:` second for measurement only. Respect `remoteMaxBytes` when content-length is present and before decoding downloaded buffers. Per-render cache; global sets de-duplicate errors/warnings. `cacheMax` 0 disables cache.
    - Apply `setImgSize` (scaleSuffix, resize via title, `imagescale`, optional `conditionalResize`, noUpscale always on) and set width/height.
 4. Frontmatter resolution and base URL are cached per render to avoid recompute.
 
@@ -69,7 +69,7 @@
 - The DOM module imports `./img-util.js`; ensure the base URL is compatible or bundle it for Webview use.
 - Remote sizing in `index.js` uses synchronous fetch; if enabled in an extension host, it can block UI. Prefer `disableRemoteSize: true` in VS Code.
 - Protocol-relative remote sizing now falls back from `https:` to `http:` for measurement, but the emitted `src` is left unchanged.
-- `remoteMaxBytes` only applies when content-length is present; large remote downloads can still occur without it.
+- `remoteMaxBytes` can prevent decoding oversized downloaded buffers, but large remote downloads can still occur when content-length is absent.
 - `outputUrlMode: path-only` assumes same-origin and will drop the domain.
 - `previewMode: 'markdown'` keeps the markdown `src` for display; in VS Code Webview, relative paths may not resolve, so use `previewMode: 'output'` there.
 - On `file://` pages, the DOM script auto-sets `suppressErrors: 'local'` and disables `enableSizeProbe` unless explicitly overridden to reduce noisy local load errors.

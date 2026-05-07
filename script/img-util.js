@@ -17,6 +17,7 @@ const absoluteUrlReg = /^(?:[a-z][a-z0-9+.-]*:)?\/\//i
 const htmlFileReg = /\.(html|htm|xhtml)$/i
 const urlPathReg = /^([a-z]+:\/\/)(.*)/
 const neverMatchReg = /a^/
+const allowedOutputUrlModes = Object.freeze(new Set(['absolute', 'protocol-relative', 'path-only']))
 const slashCharCode = 47
 const dotCharCode = 46
 const lowerRCharCode = 114
@@ -212,6 +213,15 @@ const buildImageExtensionRegExp = (value) => {
   return extPattern
     ? new RegExp(`\\.(?:${extPattern})(?=$|[?#])`, 'i')
     : neverMatchReg
+}
+const normalizeOutputUrlMode = (value, onWarning = null) => {
+  if (value === undefined || value === null || value === '') return 'absolute'
+  const mode = toText(value).trim()
+  if (allowedOutputUrlModes.has(mode)) return mode
+  if (typeof onWarning === 'function') {
+    onWarning(`Invalid outputUrlMode value: ${String(value)}. Using 'absolute'.`)
+  }
+  return 'absolute'
 }
 const isHttpUrl = (value) => httpUrlReg.test(toText(value))
 const isProtocolRelativeUrl = (value) => protocolRelativeReg.test(toText(value))
@@ -519,7 +529,7 @@ const getScaleSuffixValue = (imgName) => {
   return info ? info.value : ''
 }
 
-const setImgSize = (imgName, imgData, scaleSuffix, resize, title, imageScale, noUpscale, conditionalResize = null) => {
+const setImgSize = (imgName, imgData, scaleSuffix, resize, title, imageScale, conditionalResize = null) => {
   if (!imgData) return {}
   const originalWidth = imgData.width
   const originalHeight = imgData.height
@@ -578,7 +588,7 @@ const setImgSize = (imgName, imgData, scaleSuffix, resize, title, imageScale, no
       }
     }
   }
-  if (noUpscale && Number.isFinite(originalWidth) && Number.isFinite(originalHeight) && w > 0 && h > 0) {
+  if (Number.isFinite(originalWidth) && Number.isFinite(originalHeight) && w > 0 && h > 0) {
     const limitScale = Math.min(1, originalWidth / w, originalHeight / h)
     if (limitScale < 1) {
       w = Math.round(w * limitScale)
@@ -680,6 +690,7 @@ export {
   normalizeResizeValue,
   classifyResizeHint,
   normalizeConditionalResize,
+  normalizeOutputUrlMode,
   getImageScaleResizeValue,
   getScaleSuffixValue,
   safeDecodeUri,

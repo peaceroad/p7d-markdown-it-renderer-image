@@ -725,6 +725,21 @@ urlimage: https://image.example.com/assets/
   assert.strictEqual(img.getAttribute('src'), '/assets/cat.jpg')
 })
 
+await runTest(25.5, 'invalid outputUrlMode falls back to absolute', async () => {
+  const images = [
+    new MockElement('img', { src: 'cat.jpg', alt: 'cat' })
+  ]
+  const markdownWithYaml = `---
+url: https://example.com/page
+urlimage: https://image.example.com/assets/
+---`
+
+  await testSetImageAttributes(images, { outputUrlMode: 'invalid-mode' }, markdownWithYaml)
+
+  const img = images[0]
+  assert.strictEqual(img.getAttribute('src'), 'https://image.example.com/assets/cat.jpg')
+})
+
 // Test 26: option urlImageBase without frontmatter
 await runTest(26, 'urlImageBase option without frontmatter', async () => {
   const images = [
@@ -755,8 +770,8 @@ imagescale: 50%
   assert.strictEqual(img.getAttribute('data-img-resize-origin'), 'imagescale')
 })
 
-// Test 28: noUpscale caps global scaling
-await runTest(28, 'noUpscale caps resize scaling', async () => {
+// Test 28: no-upscale caps global scaling
+await runTest(28, 'no-upscale caps resize scaling and rejects removed option', async () => {
   const images = [
     new MockElement('img', { src: 'cat.jpg', alt: 'cat', title: 'resize:200%' })
   ]
@@ -767,12 +782,27 @@ await runTest(28, 'noUpscale caps resize scaling', async () => {
   assert.strictEqual(img.getAttribute('width'), '800')
   assert.strictEqual(img.getAttribute('height'), '600')
 
-  const optionOverrideImages = [
-    new MockElement('img', { src: 'cat.jpg', alt: 'cat', title: 'resize:200%' })
-  ]
-  await testSetImageAttributes(optionOverrideImages, { resize: true, noUpscale: false })
-  assert.strictEqual(optionOverrideImages[0].getAttribute('width'), '800')
-  assert.strictEqual(optionOverrideImages[0].getAttribute('height'), '600')
+  const mod = await loadDomModule()
+  await assert.rejects(
+    () => mod.createContext('', { noUpscale: false }, null),
+    /noUpscale option was removed/
+  )
+
+  const metaTag = new MockElement('meta', {
+    name: 'markdown-frontmatter',
+    content: JSON.stringify({
+      _extensionSettings: {
+        rendererImage: {
+          noUpscale: false,
+        },
+      },
+    }),
+  })
+  const root = createMockDocument([], metaTag)
+  await assert.rejects(
+    () => mod.createContext('', { readMeta: true }, root),
+    /noUpscale option was removed/
+  )
 })
 
 // Test 29: imagescale clamps above 100%

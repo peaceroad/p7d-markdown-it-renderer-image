@@ -120,7 +120,7 @@ await runInPreview({
 - `suppressErrors` (default: `'none'`): `none` | `all` | `local` | `remote`.
 
 Notes:
-- Final size is always capped to original dimensions (no upscaling behavior).
+- Final size is always capped to original dimensions (no upscaling behavior). The old internal `noUpscale` option is not supported.
 - `conditionalResize.orientation` accepts `portrait` or `landscape` and is evaluated from measured image dimensions (`height > width` or `width > height`).
 - `conditionalResize` requires exactly one of `targetWidth` or `targetHeight`.
 - `outputUrlMode: 'path-only'` assumes same-origin URL usage.
@@ -130,7 +130,7 @@ Notes:
 - `mdPath` (default: `''`): Markdown file path or directory for local image sizing.
 - `disableRemoteSize` (default: `false`): Skip remote image sizing.
 - `remoteTimeout` (default: `5000`): `sync-fetch` timeout (ms).
-- `remoteMaxBytes` (default: `16MB`): Skip remote image when `content-length` exceeds this value.
+- `remoteMaxBytes` (default: `16MB`): Skip remote image when `content-length` or the downloaded buffer exceeds this value.
 - `cacheMax` (default: `64`): Per-render size cache entries (`0` disables).
 
 ### DOM-only
@@ -263,7 +263,7 @@ Recommendations for extension hosts (for example VS Code):
 - Let DOM helper handle preview sizing.
 
 Important limit:
-- `remoteMaxBytes` is effective only when `content-length` is present.
+- `remoteMaxBytes` can prevent decoding oversized downloaded buffers, but it can only prevent the download itself when `content-length` is present.
 - Protocol-relative remote images (`//cdn.example.com/cat.jpg`) are measured with `https:` first and then `http:` if HTTPS fails. The emitted `src` itself is not rewritten by this fallback.
 
 ## Testing
