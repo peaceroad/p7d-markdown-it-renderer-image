@@ -65,6 +65,8 @@ observer?.disconnect()
 
 - In browser builds, package-root import resolves to the DOM helper (named exports + no-op default export).
 - The default export in the DOM helper is intentionally a no-op and returns a resolved Promise.
+- Node plugin options are normalized when `.use(mditRendererImage, options)` runs. Create a new `markdown-it` instance for different static option sets.
+- Repeating `.use(mditRendererImage, ...)` on the same `markdown-it` instance is ignored after the first install so the core rule is not registered twice.
 - `createContext()` reads YAML frontmatter from `markdownCont` (first argument).
 - DOM and Node frontmatter normalization accepts legacy flat keys, dotted keys, and simple nested object forms.
 - With `readMeta: true`, DOM helper additionally reads `meta[name="markdown-frontmatter"]` (JSON).
@@ -148,7 +150,7 @@ Notes:
 - `enableSizeProbe` (default: `true`): Enable browser image probing for dimensions.
 - `awaitSizeProbes` (default: `true`): Await all probe promises before returning summary.
 - `sizeProbeTimeoutMs` (default: `3000`): Probe timeout (`0` disables timeout).
-- `probeCacheMaxEntries` (default: `0`): Cross-run probe cache size (`0` disables).
+- `probeCacheMaxEntries` (default: `0`): Cross-run probe cache size (`0` disables persistent cache entries; same-run in-flight probe requests are still deduplicated).
 - `probeCacheTtlMs` (default: `0`): Success cache TTL (ms).
 - `probeNegativeCacheTtlMs` (default: `0`): Failure/timeout cache TTL (ms).
 - `keepPreviousDimensionsDuringResizeEdit` (default: `false`): While resize title is in a `pending` state, keep current `width`/`height` when `src` is unchanged and size attrs already exist.

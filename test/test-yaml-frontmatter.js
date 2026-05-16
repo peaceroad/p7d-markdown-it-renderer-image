@@ -46,6 +46,15 @@ let mdFrontmatter = mdit().use(mditRendererImage, {
   mdPath: __dirname + path.sep + 'examples-yaml-frontmatter.md',
 })
 
+let mdFrontmatterResize = mdit().use(mditRendererImage, {
+  resolveSrc: true,
+  disableRemoteSize: true,
+  suppressErrors: 'local',
+  resize: true,
+  autoHideResizeTitle: false,
+  mdPath: __dirname + path.sep + 'examples-yaml-frontmatter.md',
+})
+
 let mdOptionBase = mdit().use(mditRendererImage, {
   resolveSrc: true,
   disableRemoteSize: true,
@@ -281,6 +290,9 @@ try {
   }
   const hImageScale = mdFrontmatter.render('![Alt](cat.jpg)', envImageScale)
   assert.strictEqual(hImageScale, '<p><img src="cat.jpg" alt="Alt" width="200" height="150" data-img-resize="50%" data-img-resize-origin="imagescale"></p>\n')
+
+  const hTitleResizeOverImageScale = mdFrontmatterResize.render('![Alt](cat.jpg "resize:25%")', envImageScale)
+  assert.strictEqual(hTitleResizeOverImageScale, '<p><img src="cat.jpg" alt="Alt" title="resize:25%" width="100" height="75" data-img-resize="25%"></p>\n')
 
   const envImageScaleClamp = {
     frontmatter: {

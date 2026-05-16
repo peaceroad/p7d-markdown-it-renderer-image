@@ -963,7 +963,7 @@ export const applyImageTransforms = async (root, contextOrOptions = {}, markdown
     const effectiveResizeValue = titleResizeValue
       || imageScaleResizeValue
       || (!titleAttr ? storedResizeValue : '')
-    const effectiveResizeOrigin = imageScaleResizeValue
+    const effectiveResizeOrigin = !titleResizeValue && imageScaleResizeValue
       ? 'imagescale'
       : (!titleAttr && storedResizeValue && storedResizeOrigin === 'imagescale'
         ? storedResizeOrigin

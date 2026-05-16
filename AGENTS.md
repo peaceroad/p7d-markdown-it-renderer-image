@@ -13,6 +13,7 @@
    - Load dimensions via `image-size` (local) or `sync-fetch` + `image-size` (remote); protocol-relative remote URLs try `https:` first and `http:` second for measurement only. Respect `remoteMaxBytes` when content-length is present and before decoding downloaded buffers. Per-render cache; global sets de-duplicate errors/warnings. `cacheMax` 0 disables cache.
    - Apply `setImgSize` (scaleSuffix, resize via title, `imagescale`, optional `conditionalResize`, noUpscale always on) and set width/height.
 4. Frontmatter resolution and base URL are cached per render to avoid recompute.
+5. Repeated `.use(...)` calls on the same `md` instance are ignored after the first install to avoid duplicate core-rule execution; use a new `md` instance for different static options.
 
 ## script/set-img-attributes.js (browser)
 1. Exports `classifyResizeHint`, `createContext`, `applyImageTransforms`, `applyImageTransformsToString`, `startObserver`, and `runInPreview`.

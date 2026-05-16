@@ -13,7 +13,6 @@ if (isWindows) {
 
 const commonOpt = { scaleSuffix: true, resize: true, autoHideResizeTitle: false }
 const md = mdit().use(mditRendererImage, commonOpt);
-//const mdLazy = mdit().use(mditRendererImage, {scaleSuffix: true, lazyLoad: true, asyncDecode: true});
 const mdLazy = mdit().use(mditRendererImage, { ...commonOpt, lazyLoad: true });
 const mdEnvPat = mdit().use(mditRendererImage, { ...commonOpt, mdPath: __dirname + '/examples.md' });
 const mdHideDefault = mdit().use(mditRendererImage, { scaleSuffix: true, resize: true });
@@ -59,6 +58,34 @@ try {
     () => mdit().use(mditRendererImage, { resize: true, noUpscale: false }),
     /noUpscale option was removed/
   )
+  const originalConsoleWarn = console.warn
+  const duplicateUseWarnings = []
+  try {
+    console.warn = (...args) => {
+      duplicateUseWarnings.push(args.map((value) => String(value)).join(' '))
+    }
+    const mdDuplicateUse = mdit().use(mditRendererImage, {
+      resolveSrc: true,
+      disableRemoteSize: true,
+      suppressErrors: 'all',
+      urlImageBase: 'https://a.example/',
+      mdPath: path.join(__dirname, 'test.md'),
+    })
+    mdDuplicateUse.use(mditRendererImage, {
+      resolveSrc: true,
+      disableRemoteSize: true,
+      suppressErrors: 'all',
+      lazyLoad: true,
+      noUpscale: false,
+      urlImageBase: 'https://b.example/',
+      mdPath: path.join(__dirname, 'test.md'),
+    })
+    const hDuplicateUse = mdDuplicateUse.render('![](cat.jpg)')
+    assert.strictEqual(hDuplicateUse, '<p><img src="https://a.example/cat.jpg" alt="" width="400" height="300"></p>\n')
+    assert.ok(duplicateUseWarnings.some((message) => message.includes('already installed')))
+  } finally {
+    console.warn = originalConsoleWarn
+  }
 } catch (e) {
   pass = false
   console.log('incorrect(setup guards): ')

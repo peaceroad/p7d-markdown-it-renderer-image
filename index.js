@@ -33,6 +33,7 @@ const emptyImgData = Object.freeze({})
 const globalLogSetMaxEntries = 2048
 const yamlFrontmatterFence = '---\n'
 const defaultScaleSuffixDataAttr = 'data-img-scale-suffix'
+const rendererImageInstalledKey = Symbol.for('@peaceroad/markdown-it-renderer-image/installed')
 
 const getRemoteFetchTargets = (value) => {
   if (!isProtocolRelativeUrl(value)) return [value]
@@ -219,11 +220,16 @@ const getImgData = (src, isRemote, timeout, cache, cacheMax, failedSet, suppress
 
 
 const mditRendererImage = (md, option) => {
-  const opt = { ...defaultNodeOptions }
   const safeOption = option && typeof option === 'object' ? { ...option } : null
+  if (md?.[rendererImageInstalledKey]) {
+    console.warn('[renderer-image] Plugin already installed on this markdown-it instance. Create a new instance to use different options.')
+    return
+  }
   if (safeOption && Object.prototype.hasOwnProperty.call(safeOption, 'noUpscale')) {
     throw new Error('[renderer-image] noUpscale option was removed. Image sizes are always capped to intrinsic dimensions.')
   }
+
+  const opt = { ...defaultNodeOptions }
   if (safeOption) Object.assign(opt, safeOption)
 
   if (!['none', 'all', 'local', 'remote'].includes(opt.suppressErrors)) {
@@ -268,6 +274,13 @@ const mditRendererImage = (md, option) => {
     const index = token.attrIndex(name)
     if (index >= 0) token.attrs.splice(index, 1)
   }
+
+  Object.defineProperty(md, rendererImageInstalledKey, {
+    configurable: false,
+    enumerable: false,
+    value: true,
+    writable: false,
+  })
 
   const processImageToken = (token, state, fmContext) => {
     const { imgDataCache, failedImgLoads, missingMdPathWarnings } = state
@@ -363,7 +376,7 @@ const mditRendererImage = (md, option) => {
 
     const titleResizeValue = resizeEnabled ? normalizeResizeValue(titleRaw) : ''
     const effectiveResizeValue = titleResizeValue || imageScaleResizeValue || ''
-    const effectiveResizeOrigin = imageScaleResizeValue ? 'imagescale' : ''
+    const effectiveResizeOrigin = !titleResizeValue && imageScaleResizeValue ? 'imagescale' : ''
     const removeTitle = autoHideResizeTitle && !!titleResizeValue
     if (titleRaw && !removeTitle) {
       token.attrSet('title', titleRaw)

@@ -283,8 +283,7 @@ Some markdown content here.`
   
   const img = images[0]
   const finalSrc = img.getAttribute('src')
-  // The exact result depends on how resolveSrc processes the path
-  assert.ok(finalSrc.includes('test.jpg'))
+  assert.strictEqual(finalSrc, 'https://example.com/test.jpg')
 })
 
 // Test 6: Image size (width/height) attribute setting test
@@ -768,6 +767,23 @@ imagescale: 50%
   assert.strictEqual(img.getAttribute('height'), '300')
   assert.strictEqual(img.getAttribute('data-img-resize'), '50%')
   assert.strictEqual(img.getAttribute('data-img-resize-origin'), 'imagescale')
+})
+
+await runTest(27.5, 'title resize metadata wins over imagescale origin', async () => {
+  const images = [
+    new MockElement('img', { src: 'cat.jpg', alt: 'cat', title: 'resize:25%' })
+  ]
+  const markdownWithYaml = `---
+imagescale: 50%
+---`
+
+  await testSetImageAttributes(images, { resize: true }, markdownWithYaml)
+
+  const img = images[0]
+  assert.strictEqual(img.getAttribute('width'), '200')
+  assert.strictEqual(img.getAttribute('height'), '150')
+  assert.strictEqual(img.getAttribute('data-img-resize'), '25%')
+  assert.strictEqual(img.getAttribute('data-img-resize-origin'), '')
 })
 
 // Test 28: no-upscale caps global scaling

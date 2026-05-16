@@ -266,6 +266,12 @@ const isHtmlFile = (value) => {
   if (!text) return false
   return htmlFileReg.test(text)
 }
+const startsWithYamlFrontmatter = (value) => {
+  const text = toText(value)
+  return text === '---'
+    || text.startsWith(yamlFrontmatterFenceLf)
+    || text.startsWith(yamlFrontmatterFenceCrLf)
+}
 
 const normalizeRelativePath = (path) => {
   const text = toText(path)
@@ -361,7 +367,7 @@ const getImageName = (value) => {
 const parseFrontmatter = (markdownCont) => {
   const text = toText(markdownCont)
   if (!text) return {}
-  if (text !== '---' && !text.startsWith(yamlFrontmatterFenceLf) && !text.startsWith(yamlFrontmatterFenceCrLf)) {
+  if (!startsWithYamlFrontmatter(text)) {
     return {}
   }
   const yamlMatch = text.match(yamlReg)
