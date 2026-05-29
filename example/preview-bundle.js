@@ -58,6 +58,7 @@ const resizePendingPrefixReg = /^(?:r|re|res|resi|resiz|resize|resized|resized t
 const resizePendingValueReg = /^(?:resize(?:d to)?)\s*[:：]?\s*(?:[0-9]+(?:\.[0-9]*)?\s*(?:%|％|p|px)?)?$/i
 const resizePendingJaValueReg = /^(?:リ|リサ|リサイ|リサイズ)\s*[:：]?\s*(?:[0-9]+(?:\.[0-9]*)?\s*(?:%|％|p|px)?)?$/i
 const yamlReg = /^--- *\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/
+const imageScalePercentReg = /^([0-9]+(?:\.[0-9]+)?)\s*%$/
 const percentEncodedReg = /%[0-9A-Fa-f]{2}/
 const encodedSlashReg = /%2f|%5c/i
 const httpUrlReg = /^https?:\/\//i
@@ -78,6 +79,7 @@ const upperRCharCode = 82
 const katakanaRiCharCode = 12522
 const yamlFrontmatterFenceLf = '---\n'
 const yamlFrontmatterFenceCrLf = '---\r\n'
+const windowsDriveSegmentReg = /^[A-Za-z]:$/
 
 const needsPathNormalization = (text) => {
   const len = text.length
@@ -304,7 +306,7 @@ const toFileUrl = (value) => {
   const without = normalized.replace(/^\/+/, '')
   const segments = without.split('/')
   const encoded = segments.map((segment, index) => {
-    if (index === 0 && /^[A-Za-z]:$/.test(segment)) return segment
+    if (index === 0 && windowsDriveSegmentReg.test(segment)) return segment
     return encodeURIComponent(segment)
   })
   return `file:///${encoded.join('/')}`
@@ -372,22 +374,23 @@ const getUrlPath = (value) => {
   const text = toText(value)
   if (!text) return ''
   const clean = stripQueryHash(text)
-  const normalizePath = (input) => {
-    const pathText = toText(input) || '/'
-    const trimmed = pathText.replace(/\/+$/, '')
-    const last = trimmed.split('/').pop() || ''
-    if (isHtmlFile(last)) {
-      const index = trimmed.lastIndexOf('/')
-      return index >= 0 ? trimmed.slice(0, index + 1) : '/'
-    }
-    return trimmed ? trimmed + '/' : '/'
-  }
   try {
     const parsed = new URL(clean)
-    return normalizePath(parsed.pathname)
+    return normalizeUrlPath(parsed.pathname)
   } catch {
-    return normalizePath(clean)
+    return normalizeUrlPath(clean)
   }
+}
+
+const normalizeUrlPath = (input) => {
+  const pathText = toText(input) || '/'
+  const trimmed = pathText.replace(/\/+$/, '')
+  const lastSlashIndex = trimmed.lastIndexOf('/')
+  const last = lastSlashIndex >= 0 ? trimmed.slice(lastSlashIndex + 1) : trimmed
+  if (isHtmlFile(last)) {
+    return lastSlashIndex >= 0 ? trimmed.slice(0, lastSlashIndex + 1) : '/'
+  }
+  return trimmed ? trimmed + '/' : '/'
 }
 
 const joinUrl = (base, path) => {
@@ -510,7 +513,7 @@ const parseImageScale = (value) => {
   }
   const text = String(value).trim()
   if (!text) return null
-  const percentMatch = text.match(/^([0-9]+(?:\.[0-9]+)?)\s*%$/)
+  const percentMatch = text.match(imageScalePercentReg)
   if (percentMatch) {
     const percentValue = Number(percentMatch[1])
     if (!Number.isFinite(percentValue) || percentValue <= 0) return null
@@ -601,7 +604,7 @@ const setImgSize = (imgName, imgData, scaleSuffix, resize, title, imageScale, co
       if (unit === 'x') {
         w = Math.round(w / scale)
         h = Math.round(h / scale)
-      } else if (/[dp]pi/.test(unit)) {
+      } else if (unit === 'dpi' || unit === 'ppi') {
         w = Math.round(w * 96 / scale)
         h = Math.round(h * 96 / scale)
       }
@@ -681,8 +684,8 @@ const getFrontmatter = (frontmatter, option = {}) => {
   let lid = toText(resolvedLid.value)
   if (lid) lid = lid.replace(/\\/g, '/')
   if (lid) {
-    if (!/\/$/.test(lid)) lid += '/'
-    if (/^\.\//.test(lid)) lid = lid.replace(/^\.\//, '')
+    if (!lid.endsWith('/')) lid += '/'
+    if (lid.startsWith('./')) lid = lid.slice(2)
   }
   let url = toText(resolvedUrl.value)
   if (url) {
@@ -699,7 +702,7 @@ const getFrontmatter = (frontmatter, option = {}) => {
   let lmd = toText(resolvedLmd.value)
   if (lmd) lmd = lmd.replace(/\\/g, '/')
   if (lmd) {
-    if (!/\/$/.test(lmd)) lmd += '/'
+    if (!lmd.endsWith('/')) lmd += '/'
   }
   const imageScale = parseImageScale(resolvedImageScale.value)
   const imageScaleResizeValue = getImageScaleResizeValue(resolvedImageScale.value)
@@ -727,10 +730,10 @@ const applyOutputUrlMode = (value, mode) => {
   const text = toText(value)
   if (!text || !mode || mode === 'absolute') return text
   if (mode === 'protocol-relative') {
-    return text.replace(/^https?:\/\//i, '//')
+    return text.replace(httpUrlReg, '//')
   }
   if (mode === 'path-only') {
-    if (text.startsWith('//') || /^https?:\/\//i.test(text)) {
+    if (text.startsWith('//') || httpUrlReg.test(text)) {
       const target = text.startsWith('//') ? `https:${text}` : text
       try {
         const parsed = new URL(target)
@@ -1029,10 +1032,8 @@ const setCachedProbeResult = (state, key, result, maxEntries, now) => {
 const sharedContextUtils = Object.freeze({
   setImgSize,
   normalizeRelativePath,
-  normalizeResizeValue,
   classifyResizeHint,
   resizeValueReg,
-  normalizeExtensions,
   isHttpUrl,
   isProtocolRelativeUrl,
   isFileUrl,

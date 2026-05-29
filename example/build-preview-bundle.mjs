@@ -15,7 +15,7 @@ const sourceFiles = [
 const stripEsmSyntax = (source) => {
   return source
     .replace(/^import\s*\{[\s\S]*?\}\s*from\s*['"][^'"]+['"]\s*;?\s*/gm, '')
-    .replace(/^\s*export\s*\{[\s\S]*?\}\s*;?\s*$/gm, '')
+    .replace(/^\s*export\s*\{[^}]*\}\s*(?:from\s*['"][^'"]+['"])?\s*;?\s*$/gm, '')
     .replace(/^export\s+default\s+/gm, 'const __default__ = ')
     .replace(/^export\s+async\s+function\s+/gm, 'async function ')
     .replace(/^export\s+function\s+/gm, 'function ')

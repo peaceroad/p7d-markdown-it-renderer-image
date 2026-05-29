@@ -4,14 +4,12 @@ import {
   getFrontmatter,
   normalizeRelativePath,
   resolveImageBase,
-  normalizeResizeValue,
   classifyResizeHint,
   normalizeConditionalResize,
   normalizeOutputUrlMode,
   resizeValueReg,
   buildImageExtensionRegExp,
   getScaleSuffixValue,
-  normalizeExtensions,
   isHttpUrl,
   isProtocolRelativeUrl,
   isFileUrl,
@@ -24,9 +22,10 @@ import {
   getImageName,
   applyOutputUrlMode,
 } from './img-util.js'
-import { defaultSharedOptions, defaultDomOptions, defaultNodeOptions } from './default-options.js'
+import { defaultDomOptions } from './default-options.js'
 
-export { defaultSharedOptions, defaultDomOptions, defaultNodeOptions, classifyResizeHint }
+export { defaultSharedOptions, defaultDomOptions, defaultNodeOptions } from './default-options.js'
+export { classifyResizeHint }
 
 const getAttr = (element, name) => {
   if (!element) return ''
@@ -314,10 +313,8 @@ const setCachedProbeResult = (state, key, result, maxEntries, now) => {
 const sharedContextUtils = Object.freeze({
   setImgSize,
   normalizeRelativePath,
-  normalizeResizeValue,
   classifyResizeHint,
   resizeValueReg,
-  normalizeExtensions,
   isHttpUrl,
   isProtocolRelativeUrl,
   isFileUrl,

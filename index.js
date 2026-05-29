@@ -3,7 +3,7 @@ import path from 'path'
 import { fileURLToPath } from 'url'
 import fetch from 'sync-fetch'
 import imageSize from 'image-size'
-import { defaultSharedOptions, defaultDomOptions, defaultNodeOptions } from './script/default-options.js'
+import { defaultNodeOptions } from './script/default-options.js'
 import {
   setImgSize,
   getFrontmatter,
@@ -24,7 +24,7 @@ import {
   safeDecodeUri,
 } from './script/img-util.js'
 
-export { defaultSharedOptions, defaultDomOptions, defaultNodeOptions }
+export { defaultSharedOptions, defaultDomOptions, defaultNodeOptions } from './script/default-options.js'
 export { classifyResizeHint } from './script/img-util.js'
 
 const globalFailedImgLoads = new Set()

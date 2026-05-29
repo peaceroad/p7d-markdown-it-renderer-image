@@ -65,10 +65,19 @@
 - `npm test` for Node-side plugin + YAML frontmatter tests.
 - `npm run test:script` for browser-side DOM handling tests (includes resize metadata/origin and title removal coverage).
 
+## Change checklist
+- Options/API changes: update `script/default-options.js`, Node options, DOM `createContext` / `_extensionSettings.rendererImage` ingestion, README, AGENTS.md, and direct + meta-derived tests together. Removed options should fail fast at every public ingress path.
+- URL/frontmatter changes: test dotted, nested, and legacy aliases; invalid relative `images.dirUrl` / `urlimage`; `lid`; `lmd`; query/hash preservation; protocol-relative URLs; file URLs; non-ASCII names; and encoded `%2F` / `%5C` paths.
+- Sizing changes: test local files, disabled remote sizing, protocol-relative remote fallback, `remoteMaxBytes`, `scaleSuffix`, title `resize`, `imagescale`, `conditionalResize`, and no-upscale clamping.
+- DOM observer/probe changes: test `readMeta` filter refresh, prebuilt contexts, `observeDebounceMs`, MutationObserver absence, `setDomSrc: false`, `previewMode` variants, probe cache TTLs, and `keepPreviousDimensionsDuringResizeEdit`.
+- Metadata changes: keep `data-img-resize`, `${resizeDataAttr}-origin`, `data-img-scale-suffix`, `data-img-src-raw`, and `previewOutputSrcAttr` semantics synchronized between Node, DOM, README, and tests.
+- Generated preview bundle: when files under `script/` change, run `node example/build-preview-bundle.mjs` and include the regenerated `example/preview-bundle.js` if the example bundle is meant to stay current.
+
 ## Concerns / notes
 - VS Code Webview blocks `file://`; pass `lmd` as a Webview URI from the extension (e.g., `asWebviewUri`) instead of a raw path.
 - The DOM module imports `./img-util.js`; ensure the base URL is compatible or bundle it for Webview use.
 - Remote sizing in `index.js` uses synchronous fetch; if enabled in an extension host, it can block UI. Prefer `disableRemoteSize: true` in VS Code.
+- Treat any future default change for remote sizing as breaking unless corpus-wide output/performance diffs prove otherwise; for untrusted markdown and extension hosts, document `disableRemoteSize: true` as the safe preset.
 - Protocol-relative remote sizing now falls back from `https:` to `http:` for measurement, but the emitted `src` is left unchanged.
 - `remoteMaxBytes` can prevent decoding oversized downloaded buffers, but large remote downloads can still occur when content-length is absent.
 - `outputUrlMode: path-only` assumes same-origin and will drop the domain.

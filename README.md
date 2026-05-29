@@ -29,6 +29,15 @@ console.log(md.render(mdText))
 
 `mdPath` accepts a markdown file path or a directory path.
 
+For untrusted markdown, server-side rendering, or extension hosts, prefer disabling Node remote size probes so rendering does not synchronously fetch arbitrary image URLs:
+
+```js
+const md = mdit().use(mditRendererImage, {
+  mdPath: mdFile,
+  disableRemoteSize: true,
+})
+```
+
 You can also pass `mdPath` at render time:
 
 ```js
@@ -63,7 +72,8 @@ observer?.disconnect()
 
 ## Runtime Notes
 
-- In browser builds, package-root import resolves to the DOM helper (named exports + no-op default export).
+- In browser builds whose bundler honors the `browser` export condition, package-root import resolves to the DOM helper (named exports + no-op default export).
+- To target the DOM helper consistently across tools, import `@peaceroad/markdown-it-renderer-image/script/set-img-attributes.js` directly.
 - The default export in the DOM helper is intentionally a no-op and returns a resolved Promise.
 - Node plugin options are normalized when `.use(mditRendererImage, options)` runs. Create a new `markdown-it` instance for different static option sets.
 - Repeating `.use(mditRendererImage, ...)` on the same `markdown-it` instance is ignored after the first install so the core rule is not registered twice.
@@ -87,12 +97,21 @@ await runInPreview({
 })
 ```
 
-### 2) Output parity between Node and DOM
+### 2) Node / extension host with remote fetch disabled
+
+```js
+const md = mdit().use(mditRendererImage, {
+  mdPath: mdFile,
+  disableRemoteSize: true,
+})
+```
+
+### 3) Output parity between Node and DOM
 
 - DOM: `previewMode: 'output'`, `setDomSrc: true`
 - Node: `resolveSrc: true`
 
-### 3) Keep markdown `src` for display, probe from mapped URL
+### 4) Keep markdown `src` for display, probe from mapped URL
 
 ```js
 await runInPreview({
@@ -183,6 +202,23 @@ Supported aliases are resolved in this order:
 
 Conflicting values emit a warning. `images.dirUrl` and `urlimage` must be absolute; invalid values are ignored.
 Relative or empty `urlimage` values are not treated as subdirectory hints anymore.
+
+Recommended nested frontmatter form:
+
+```yaml
+---
+page:
+  url: https://example.com/articles/post.html
+images:
+  baseUrl: https://cdn.example.com/assets/
+  stripLocalPrefix: ./docs/
+  scale: 50%
+local:
+  markdownDir: ./docs/
+---
+```
+
+Use `images.dirUrl` instead of `images.baseUrl` when images have a fixed public directory and should not inherit the page path. Otherwise use `images.baseUrl` with `page.url` so the page path is derived from the markdown page URL. Flat aliases such as `url`, `urlimagebase`, `lid`, `lmd`, and `imagescale` remain compatibility inputs.
 
 Node precedence:
 - Prefer `env.frontmatter` when provided.
