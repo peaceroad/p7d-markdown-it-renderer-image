@@ -9,11 +9,12 @@ import {
   normalizeOutputUrlMode,
   resizeValueReg,
   buildImageExtensionRegExp,
-  getScaleSuffixValue,
+  getScaleSuffixInfo,
   isHttpUrl,
   isProtocolRelativeUrl,
   isFileUrl,
   hasUrlScheme,
+  hasUriScheme,
   hasSpecialScheme,
   isAbsolutePath,
   toFileUrl,
@@ -244,14 +245,14 @@ const normalizeProbeTimeoutKeyPart = (value) => {
   if (!Number.isFinite(value) || value <= 0) return '0'
   return String(Math.floor(value))
 }
-const getProbeCacheKeys = (loadSrc, timeoutMs) => {
+const getProbeCacheKeys = (loadSrc, timeoutPart, includeSuccessKey, includeNegativeKey) => {
   const normalizedSrc = String(loadSrc || '')
-  const timeoutPart = normalizeProbeTimeoutKeyPart(timeoutMs)
-  return {
-    successKey: `success:${normalizedSrc}`,
-    negativeKey: `negative:${timeoutPart}:${normalizedSrc}`,
+  const keys = {
     inFlightKey: `flight:${timeoutPart}:${normalizedSrc}`,
   }
+  if (includeSuccessKey) keys.successKey = `success:${normalizedSrc}`
+  if (includeNegativeKey) keys.negativeKey = `negative:${timeoutPart}:${normalizedSrc}`
+  return keys
 }
 const getProbeCacheState = (context, root, images = null) => {
   if (!context || !context.opt) return null
@@ -319,6 +320,7 @@ const sharedContextUtils = Object.freeze({
   isProtocolRelativeUrl,
   isFileUrl,
   hasUrlScheme,
+  hasUriScheme,
   hasSpecialScheme,
   stripQueryHash,
   getImageName,
@@ -443,13 +445,14 @@ export const createContext = async (markdownCont = '', option = {}, root = null)
     || (extensionSettings?.rendererImage
       && Object.prototype.hasOwnProperty.call(extensionSettings.rendererImage, 'enableSizeProbe'))
   if (extensionSettings) {
+    if (extensionSettings.rendererImage
+        && Object.prototype.hasOwnProperty.call(extensionSettings.rendererImage, 'noUpscale')) {
+      failRemovedNoUpscaleOption()
+    }
     if (extensionSettings.notSetImageElementAttributes || extensionSettings.disableRendererImage) {
       return { skip: true, opt: currentOpt }
     }
     if (extensionSettings.rendererImage) {
-      if (Object.prototype.hasOwnProperty.call(extensionSettings.rendererImage, 'noUpscale')) {
-        failRemovedNoUpscaleOption()
-      }
       applyRendererOptions(currentOpt, extensionSettings.rendererImage, optionOverrides)
     }
   }
@@ -506,7 +509,7 @@ export const createContext = async (markdownCont = '', option = {}, root = null)
   let adjustedLmd = ''
   if (resolveSrcEnabled && lmd) {
     adjustedLmd = String(lmd).replace(/\\/g, '/')
-    if (!isProtocolRelativeUrl(adjustedLmd) && !isFileUrl(adjustedLmd) && !hasUrlScheme(adjustedLmd) && !hasSpecialScheme(adjustedLmd)) {
+    if (!isProtocolRelativeUrl(adjustedLmd) && !isFileUrl(adjustedLmd) && !hasUriScheme(adjustedLmd)) {
       if (isAbsolutePath(adjustedLmd)) {
         adjustedLmd = toFileUrl(adjustedLmd)
       }
@@ -589,7 +592,7 @@ export const applyImageTransforms = async (root, contextOrOptions = {}, markdown
     isHttpUrl,
     isProtocolRelativeUrl,
     isFileUrl,
-    hasSpecialScheme,
+    hasUriScheme,
     stripQueryHash,
     getImageName,
     applyOutputUrlMode,
@@ -598,8 +601,6 @@ export const applyImageTransforms = async (root, contextOrOptions = {}, markdown
   const images = collectImages(root)
   const summary = createSummary(images.length)
   if (images.length === 0) return summary
-  const probeCacheState = getProbeCacheState(context, root, images)
-  const inFlightProbeState = probeCacheState?.inFlight || new Map()
   const probeCacheMaxEntries = currentOpt.probeCacheMaxEntries
   const probeCacheTtlMs = currentOpt.probeCacheTtlMs
   const probeNegativeCacheTtlMs = currentOpt.probeNegativeCacheTtlMs
@@ -628,6 +629,23 @@ export const applyImageTransforms = async (root, contextOrOptions = {}, markdown
   const tracksResizeHintState = !!(resizeEnabled && (keepPreviousDimensionsDuringResizeEdit || hasResizeHintEditingStateHook))
   const suppressLocalByMode = suppressErrorMode === 'local'
   const suppressRemoteByMode = suppressErrorMode === 'remote'
+  const successProbeCacheEnabled = probeCacheMaxEntries > 0 && probeCacheTtlMs > 0
+  const negativeProbeCacheEnabled = probeCacheMaxEntries > 0 && probeNegativeCacheTtlMs > 0
+  const probeCacheEnabled = successProbeCacheEnabled || negativeProbeCacheEnabled
+  const probeTimeoutKeyPart = normalizeProbeTimeoutKeyPart(currentOpt.sizeProbeTimeoutMs)
+  const probeCacheTtlConfig = probeCacheEnabled
+    ? {
+      successTtlMs: probeCacheTtlMs,
+      negativeTtlMs: probeNegativeCacheTtlMs,
+    }
+    : null
+  let probeCacheState = null
+  let inFlightProbeState = null
+  const ensureProbeCacheState = () => {
+    if (probeCacheState) return
+    probeCacheState = getProbeCacheState(context, root, images)
+    inFlightProbeState = probeCacheState.inFlight
+  }
 
   const emitImageProcessed = (img, status, width, height, loadSrc, finalSrc, displaySrc) => {
     if (!hasImageProcessedHook) return
@@ -653,7 +671,7 @@ export const applyImageTransforms = async (root, contextOrOptions = {}, markdown
       height: readPositiveIntAttr(img, 'height'),
     })
   }
-  const applyProbeResultToImage = (img, imgName, resizeTitleForSize, loadSrc, finalSrc, displaySrc, probeResult) => {
+  const applyProbeResultToImage = (img, imgName, scaleSuffixInfo, resizeTitleForSize, loadSrc, finalSrc, displaySrc, probeResult) => {
     let status = probeResult?.status || 'failed'
     let width = 0
     let height = 0
@@ -671,7 +689,8 @@ export const applyImageTransforms = async (root, contextOrOptions = {}, markdown
           resizeEnabled,
           resizeTitleForSize,
           imageScale,
-          conditionalResize
+          conditionalResize,
+          scaleSuffixInfo
         )
         width = sized.width
         height = sized.height
@@ -688,18 +707,17 @@ export const applyImageTransforms = async (root, contextOrOptions = {}, markdown
     return new Promise((resolve) => {
       let settled = false
       let timeoutId = null
+      const originalImage = new Image()
       const done = (status, naturalWidth = 0, naturalHeight = 0) => {
         if (settled) return
         settled = true
-        if (timeoutId) clearTimeout(timeoutId)
+        if (timeoutId != null) clearTimeout(timeoutId)
         resolve({
           status,
           naturalWidth,
           naturalHeight,
         })
       }
-
-      const originalImage = new Image()
       originalImage.onload = () => {
         if (settled) return
         if (!originalImage.naturalWidth || !originalImage.naturalHeight) {
@@ -735,13 +753,16 @@ export const applyImageTransforms = async (root, contextOrOptions = {}, markdown
   }
   const resolveProbeResult = (loadSrc, suppressLoadErrors) => {
     if (!loadSrc) return Promise.resolve(emptyProbeResult)
-    const cacheKeys = getProbeCacheKeys(loadSrc, currentOpt.sizeProbeTimeoutMs)
-    if (probeCacheState && probeCacheMaxEntries > 0) {
+    ensureProbeCacheState()
+    const cacheKeys = getProbeCacheKeys(
+      loadSrc,
+      probeTimeoutKeyPart,
+      successProbeCacheEnabled,
+      negativeProbeCacheEnabled
+    )
+    if (probeCacheEnabled) {
       const cacheCheckAt = Date.now()
-      const cached = getCachedProbeResult(probeCacheState, cacheKeys, {
-        successTtlMs: probeCacheTtlMs,
-        negativeTtlMs: probeNegativeCacheTtlMs,
-      }, cacheCheckAt)
+      const cached = getCachedProbeResult(probeCacheState, cacheKeys, probeCacheTtlConfig, cacheCheckAt)
       if (cached) return Promise.resolve(cached)
     }
     const inFlight = inFlightProbeState.get(cacheKeys.inFlightKey)
@@ -749,7 +770,10 @@ export const applyImageTransforms = async (root, contextOrOptions = {}, markdown
 
     const promise = loadImageProbeResult(loadSrc, suppressLoadErrors)
       .then((result) => {
-        if (probeCacheState && probeCacheMaxEntries > 0) {
+        const shouldCacheResult = result.status === 'sized'
+          ? successProbeCacheEnabled
+          : negativeProbeCacheEnabled
+        if (shouldCacheResult) {
           const cacheWriteAt = Date.now()
           setCachedProbeResult(
             probeCacheState,
@@ -767,9 +791,10 @@ export const applyImageTransforms = async (root, contextOrOptions = {}, markdown
     inFlightProbeState.set(cacheKeys.inFlightKey, promise)
     return promise
   }
-  const probeImage = (img, loadSrc, sizeSrc, resizeTitleForSize, finalSrc, displaySrc) => {
+  const probeImage = (img, loadSrc, sizeSrc, scaleSuffixInfo, resizeTitleForSize, finalSrc, displaySrc) => {
     const imgName = getImageName(sizeSrc)
-    const isRemoteForError = isHttpUrl(loadSrc) || isProtocolRelativeUrl(loadSrc)
+    const isRemoteForError = isProtocolRelativeUrl(loadSrc)
+      || (hasUriScheme(loadSrc) && !isFileUrl(loadSrc))
     const suppressLoadErrors = suppressAllErrors
       || (isRemoteForError ? suppressRemoteByMode : suppressLocalByMode)
 
@@ -777,6 +802,7 @@ export const applyImageTransforms = async (root, contextOrOptions = {}, markdown
       .then((probeResult) => applyProbeResultToImage(
         img,
         imgName,
+        scaleSuffixInfo,
         resizeTitleForSize,
         loadSrc,
         finalSrc,
@@ -793,10 +819,6 @@ export const applyImageTransforms = async (root, contextOrOptions = {}, markdown
 
   for (const img of images) {
     if (!img) continue
-    if (typeof img.isConnected === 'boolean' && !img.isConnected) {
-      summary.skipped += 1
-      continue
-    }
     summary.processed += 1
 
     const currentSrcAttr = getAttr(img, 'src')
@@ -806,10 +828,8 @@ export const applyImageTransforms = async (root, contextOrOptions = {}, markdown
     const srcRaw = useStored ? storedOriginalSrc : currentSrcAttr
     const srcBase = stripQueryHash(srcRaw)
     const srcSuffix = srcRaw.slice(srcBase.length)
-    const isLocalSrc = !isHttpUrl(srcRaw)
-      && !isProtocolRelativeUrl(srcRaw)
-      && !isFileUrl(srcRaw)
-      && !hasSpecialScheme(srcRaw)
+    const isLocalSrc = !isProtocolRelativeUrl(srcRaw)
+      && !hasUriScheme(srcRaw)
 
     let src = srcBase
     let finalSrc = ''
@@ -902,8 +922,6 @@ export const applyImageTransforms = async (root, contextOrOptions = {}, markdown
       resizeHintStateByImage.delete(img)
     }
 
-    const alt = img.alt
-    if (alt) setAttrIfChanged(img, 'alt', alt)
     let titleAttr = getAttr(img, 'title')
     const autoHiddenResizeTitle = autoHiddenResizeTitleByImage.get(img) || null
     if (autoHiddenResizeTitle && titleAttr && titleAttr !== autoHiddenResizeTitle.title) {
@@ -996,19 +1014,22 @@ export const applyImageTransforms = async (root, contextOrOptions = {}, markdown
       autoHiddenResizeTitleByImage.delete(img)
     }
     let managedSupplementalState = managedSupplementalAttrsByImage.get(img)
-    if (!managedSupplementalState) {
-      managedSupplementalState = { decoding: false, loading: false }
-    }
-    syncManagedAttr(img, managedSupplementalState, 'decoding', asyncDecodeEnabled, 'async', 'decoding')
-    syncManagedAttr(img, managedSupplementalState, 'loading', lazyLoadEnabled, 'lazy', 'loading')
-    if (managedSupplementalState.decoding || managedSupplementalState.loading) {
-      managedSupplementalAttrsByImage.set(img, managedSupplementalState)
-    } else {
-      managedSupplementalAttrsByImage.delete(img)
+    if (asyncDecodeEnabled || lazyLoadEnabled || managedSupplementalState) {
+      if (!managedSupplementalState) {
+        managedSupplementalState = { decoding: false, loading: false }
+      }
+      syncManagedAttr(img, managedSupplementalState, 'decoding', asyncDecodeEnabled, 'async', 'decoding')
+      syncManagedAttr(img, managedSupplementalState, 'loading', lazyLoadEnabled, 'lazy', 'loading')
+      if (managedSupplementalState.decoding || managedSupplementalState.loading) {
+        managedSupplementalAttrsByImage.set(img, managedSupplementalState)
+      } else {
+        managedSupplementalAttrsByImage.delete(img)
+      }
     }
 
     const sizeSrc = finalSrc || srcRaw || loadSrc
-    const scaleSuffixValue = scaleSuffixEnabled ? getScaleSuffixValue(getImageName(sizeSrc)) : ''
+    const scaleSuffixInfo = scaleSuffixEnabled ? getScaleSuffixInfo(getImageName(sizeSrc)) : null
+    const scaleSuffixValue = scaleSuffixInfo?.value || ''
     if (scaleSuffixDataAttr) {
       if (scaleSuffixValue) setAttrIfChanged(img, scaleSuffixDataAttr, scaleSuffixValue)
       else removeAttrIfPresent(img, scaleSuffixDataAttr)
@@ -1040,7 +1061,7 @@ export const applyImageTransforms = async (root, contextOrOptions = {}, markdown
       continue
     }
 
-    const promise = probeImage(img, loadSrc, sizeSrc, resizeTitleForSize, finalSrc, displaySrc).then((status) => {
+    const promise = probeImage(img, loadSrc, sizeSrc, scaleSuffixInfo, resizeTitleForSize, finalSrc, displaySrc).then((status) => {
       if (status === 'sized') summary.sized += 1
       else if (status === 'timeout') summary.timeout += 1
       else if (status === 'failed') summary.failed += 1
@@ -1085,6 +1106,12 @@ export const startObserver = async (root, contextOrOptions = {}, markdownCont = 
   const pendingImages = new Set()
   const rootNode = root.documentElement || root.body || root
   const metaObserverTarget = resolveMetaObserverTarget(root)
+  const isWithinObservedRoot = (img) => {
+    if (rootNode && typeof rootNode.contains === 'function') {
+      return rootNode === img || rootNode.contains(img)
+    }
+    return typeof img?.isConnected !== 'boolean' || img.isConnected
+  }
   const observerOptionsBase = {
     childList: true,
     subtree: true,
@@ -1149,7 +1176,9 @@ export const startObserver = async (root, contextOrOptions = {}, markdownCont = 
         if (disposed) break
         pending = false
         const useAll = pendingAll
-        const targets = useAll ? root : Array.from(pendingImages)
+        const targets = useAll
+          ? root
+          : Array.from(pendingImages).filter(isWithinObservedRoot)
         pendingAll = false
         pendingImages.clear()
         if (!useAll && targets.length === 0) continue
@@ -1214,10 +1243,13 @@ export const startObserver = async (root, contextOrOptions = {}, markdownCont = 
         pendingImages.add(node)
         continue
       }
-      if (node.querySelectorAll) {
-        const images = typeof node.getElementsByTagName === 'function'
-          ? node.getElementsByTagName('img')
-          : node.querySelectorAll('img')
+      let images = null
+      if (typeof node.getElementsByTagName === 'function') {
+        images = node.getElementsByTagName('img')
+      } else if (typeof node.querySelectorAll === 'function') {
+        images = node.querySelectorAll('img')
+      }
+      if (images) {
         for (const image of images) pendingImages.add(image)
       }
     }
@@ -1310,18 +1342,18 @@ export const startObserver = async (root, contextOrOptions = {}, markdownCont = 
  */
 export const runInPreview = async (setup = {}) => {
   const safeSetup = setup && typeof setup === 'object' ? setup : {}
-  const root = safeSetup.root
+  const {
+    root,
+    markdownCont: markdownValue,
+    observe: observeValue,
+    context: contextValue,
+    ...option
+  } = safeSetup
   if (!root) throw new Error('[renderer-image(dom)] runInPreview requires root.')
 
-  const markdownCont = typeof safeSetup.markdownCont === 'string' ? safeSetup.markdownCont : ''
-  const observe = !!safeSetup.observe
-  const providedContext = safeSetup.context && safeSetup.context.opt ? safeSetup.context : null
-
-  const option = { ...safeSetup }
-  delete option.root
-  delete option.markdownCont
-  delete option.observe
-  delete option.context
+  const markdownCont = typeof markdownValue === 'string' ? markdownValue : ''
+  const observe = !!observeValue
+  const providedContext = contextValue && contextValue.opt ? contextValue : null
 
   const context = providedContext || await createContext(markdownCont, option, root)
   const summary = await applyImageTransforms(root, context)
@@ -1350,6 +1382,9 @@ const shouldSuppressNoopWarning = (option) => {
   return false
 }
 const mditRendererImageBrowser = (_md, _option) => {
+  if (_option && Object.prototype.hasOwnProperty.call(_option, 'noUpscale')) {
+    failRemovedNoUpscaleOption()
+  }
   if (warnedDefaultExport || shouldSuppressNoopWarning(_option)) return Promise.resolve()
   if (typeof console !== 'undefined' && console && typeof console.warn === 'function') {
     console.warn('[renderer-image(dom)] Default export is a no-op in the browser. Use createContext/applyImageTransforms/startObserver/runInPreview instead.')

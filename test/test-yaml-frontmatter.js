@@ -365,6 +365,31 @@ local:
   })
   assert.strictEqual(hNestedDirUrl, '<p><img src="https://image.example.com/assets/cat.jpg" alt="Alt" width="400" height="300"></p>\n')
 
+  const hProtocolRelativeDirUrl = mdFrontmatter.render('![Alt](cat.jpg)', {
+    frontmatter: {
+      images: {
+        dirUrl: '//image.example.com/assets/',
+      },
+    },
+  })
+  assert.strictEqual(hProtocolRelativeDirUrl, '<p><img src="//image.example.com/assets/cat.jpg" alt="Alt" width="400" height="300"></p>\n')
+
+  const hExternalScheme = mdFrontmatter.render('![Alt](ftp://files.example.com/cat.jpg)', {
+    frontmatter: {
+      page: {
+        url: 'https://example.com/page/',
+      },
+    },
+  })
+  assert.strictEqual(hExternalScheme, '<p><img src="ftp://files.example.com/cat.jpg" alt="Alt"></p>\n')
+
+  const hOpaqueScheme = mdFrontmatter.render('![Alt](cid:cat.jpg)', {
+    frontmatter: {
+      url: 'https://example.com/page/',
+    },
+  })
+  assert.strictEqual(hOpaqueScheme, '<p><img src="cid:cat.jpg" alt="Alt"></p>\n')
+
   const frontmatterWarnings = []
   const fmLegacyFallback = getFrontmatter({
     'images.dirUrl': '2025',
@@ -388,15 +413,18 @@ try {
   assert.strictEqual(normalizeRelativePath(null), '')
   assert.strictEqual(normalizeRelativePath(123), '')
   assert.strictEqual(normalizeRelativePath({}), '')
-  assert.strictEqual(normalizeRelativePath('/'), '')
+  assert.strictEqual(normalizeRelativePath('/'), '/')
   assert.strictEqual(normalizeRelativePath('.'), '')
   assert.strictEqual(normalizeRelativePath('..'), '..')
   assert.strictEqual(normalizeRelativePath('../cat.jpg'), '../cat.jpg')
   assert.strictEqual(normalizeRelativePath('a/..'), '')
-  assert.strictEqual(normalizeRelativePath('/a/..'), '')
+  assert.strictEqual(normalizeRelativePath('/a/..'), '/')
+  assert.strictEqual(normalizeRelativePath('/../cat.jpg'), '/cat.jpg')
   assert.strictEqual(normalizeRelativePath('/a/./b'), '/a/b')
   assert.strictEqual(normalizeRelativePath('a//b'), 'a/b')
   assert.strictEqual(normalizeRelativePath('https://example.com/a/../b'), 'https://example.com/b')
+  assert.strictEqual(normalizeRelativePath('https://example.com/../b'), 'https://example.com/b')
+  assert.strictEqual(normalizeRelativePath('//example.com/a/../b?x=/../#top'), '//example.com/b?x=/../#top')
   assert.strictEqual(normalizeRelativePath('https://example.com/a/b/cat.jpg'), 'https://example.com/a/b/cat.jpg')
   assert.strictEqual(getFrontmatter(null, {}), null)
   assert.strictEqual(getFrontmatter(123, {}), null)

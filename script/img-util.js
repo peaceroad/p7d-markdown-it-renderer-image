@@ -12,11 +12,12 @@ const httpUrlReg = /^https?:\/\//i
 const protocolRelativeReg = /^\/\//
 const fileUrlReg = /^file:\/\//i
 const urlSchemeReg = /^[a-z][a-z0-9+.-]*:\/\//i
+const uriSchemeReg = /^[a-z][a-z0-9+.-]*:/i
 const specialSchemeReg = /^(data|blob|vscode-resource|vscode-webview-resource|vscode-file):/i
-const windowsAbsolutePathReg = /^[A-Za-z]:\//
+const windowsAbsolutePathReg = /^[A-Za-z]:[\\/]/
 const absoluteUrlReg = /^(?:[a-z][a-z0-9+.-]*:)?\/\//i
 const htmlFileReg = /\.(html|htm|xhtml)$/i
-const urlPathReg = /^([a-z]+:\/\/)(.*)/
+const urlPathReg = /^([a-z][a-z0-9+.-]*:\/\/)(.*)/i
 const neverMatchReg = /a^/
 const allowedOutputUrlModes = Object.freeze(new Set(['absolute', 'protocol-relative', 'path-only']))
 const slashCharCode = 47
@@ -229,6 +230,10 @@ const isHttpUrl = (value) => httpUrlReg.test(toText(value))
 const isProtocolRelativeUrl = (value) => protocolRelativeReg.test(toText(value))
 const isFileUrl = (value) => fileUrlReg.test(toText(value))
 const hasUrlScheme = (value) => urlSchemeReg.test(toText(value))
+const hasUriScheme = (value) => {
+  const text = toText(value)
+  return !!text && !windowsAbsolutePathReg.test(text) && uriSchemeReg.test(text)
+}
 const hasSpecialScheme = (value) => specialSchemeReg.test(toText(value))
 const isAbsolutePath = (value) => {
   const text = toText(value)
@@ -275,40 +280,50 @@ const startsWithYamlFrontmatter = (value) => {
     || text.startsWith(yamlFrontmatterFenceCrLf)
 }
 
-const normalizeRelativePath = (path) => {
-  const text = toText(path)
-  if (!text) return text
-  const urlSchemeMatch = text.match(urlPathReg)
-  if (urlSchemeMatch) {
-    const scheme = urlSchemeMatch[1]
-    const pathPart = urlSchemeMatch[2]
-    return scheme + normalizeRelativePath(pathPart)
-  }
-  if (!needsPathNormalization(text)) return text
-  
-  const isAbsolute = text.startsWith('/')
-  const segments = text.split('/')
+const normalizePathPart = (value, isAbsolute) => {
+  const segments = value.split('/')
   const normalized = []
-  
+
   for (const segment of segments) {
-    if (segment === '.' || (segment === '' && !isAbsolute)) {
-      continue
-    } else if (segment === '' && isAbsolute && normalized.length === 0) {
-      // Keep the first empty segment for absolute paths to preserve leading slash
-      normalized.push(segment)
-    } else if (segment === '..') {
+    if (!segment || segment === '.') continue
+    if (segment === '..') {
       if (normalized.length > 0 && normalized[normalized.length - 1] !== '..') {
         normalized.pop()
       } else if (!isAbsolute) {
-        // Keep leading .. segments for relative paths only
         normalized.push(segment)
       }
-    } else if (segment !== '') {
-      normalized.push(segment)
+      continue
     }
+    normalized.push(segment)
   }
-  
-  return normalized.join('/')
+
+  const joined = normalized.join('/')
+  return isAbsolute ? `/${joined}` : joined
+}
+
+const normalizeAbsoluteUrlPath = (prefix, remainder, suffix) => {
+  const pathStart = remainder.indexOf('/')
+  if (pathStart < 0) return prefix + remainder + suffix
+  const authority = remainder.slice(0, pathStart)
+  const pathPart = remainder.slice(pathStart)
+  if (!needsPathNormalization(pathPart)) return prefix + remainder + suffix
+  return prefix + authority + normalizePathPart(pathPart, true) + suffix
+}
+
+const normalizeRelativePath = (path) => {
+  const text = toText(path)
+  if (!text) return text
+  const clean = stripQueryHash(text)
+  const suffix = text.slice(clean.length)
+  const urlSchemeMatch = clean.match(urlPathReg)
+  if (urlSchemeMatch) {
+    return normalizeAbsoluteUrlPath(urlSchemeMatch[1], urlSchemeMatch[2], suffix)
+  }
+  if (clean.startsWith('//')) {
+    return normalizeAbsoluteUrlPath('//', clean.slice(2), suffix)
+  }
+  if (!needsPathNormalization(clean)) return text
+  return normalizePathPart(clean, clean.startsWith('/')) + suffix
 }
 
 const ensureTrailingSlash = (value) => {
@@ -321,8 +336,12 @@ const getUrlPath = (value) => {
   const text = toText(value)
   if (!text) return ''
   const clean = stripQueryHash(text)
+  const urlTarget = isProtocolRelativeUrl(clean)
+    ? `https:${clean}`
+    : (hasUrlScheme(clean) ? clean : '')
+  if (!urlTarget) return normalizeUrlPath(clean)
   try {
-    const parsed = new URL(clean)
+    const parsed = new URL(urlTarget)
     return normalizeUrlPath(parsed.pathname)
   } catch {
     return normalizeUrlPath(clean)
@@ -538,14 +557,16 @@ const getScaleSuffixValue = (imgName) => {
   return info ? info.value : ''
 }
 
-const setImgSize = (imgName, imgData, scaleSuffix, resize, title, imageScale, conditionalResize = null) => {
+const setImgSize = (imgName, imgData, scaleSuffix, resize, title, imageScale, conditionalResize = null, precomputedScaleSuffixInfo = undefined) => {
   if (!imgData) return {}
   const originalWidth = imgData.width
   const originalHeight = imgData.height
   let w = originalWidth
   let h = originalHeight
   if (scaleSuffix) {
-    const suffixInfo = getScaleSuffixInfo(imgName)
+    const suffixInfo = precomputedScaleSuffixInfo === undefined
+      ? getScaleSuffixInfo(imgName)
+      : precomputedScaleSuffixInfo
     if (suffixInfo) {
       const { scale, unit } = suffixInfo
       if (unit === 'x') {
@@ -652,7 +673,9 @@ const getFrontmatter = (frontmatter, option = {}) => {
     if (!lmd.endsWith('/')) lmd += '/'
   }
   const imageScale = parseImageScale(resolvedImageScale.value)
-  const imageScaleResizeValue = getImageScaleResizeValue(resolvedImageScale.value)
+  const imageScaleResizeValue = Number.isFinite(imageScale) && imageScale > 0
+    ? formatPercent(imageScale * 100)
+    : ''
   return { url, urlimage, urlimagebase, lid, lmd, imageScale, imageScaleResizeValue }
 }
 
@@ -701,6 +724,7 @@ export {
   normalizeConditionalResize,
   normalizeOutputUrlMode,
   getImageScaleResizeValue,
+  getScaleSuffixInfo,
   getScaleSuffixValue,
   safeDecodeUri,
   stripQueryHash,
@@ -709,6 +733,7 @@ export {
   isProtocolRelativeUrl,
   isFileUrl,
   hasUrlScheme,
+  hasUriScheme,
   hasSpecialScheme,
   isAbsolutePath,
   toFileUrl,

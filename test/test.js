@@ -58,6 +58,40 @@ try {
     () => mdit().use(mditRendererImage, { resize: true, noUpscale: false }),
     /noUpscale option was removed/
   )
+  const presetOptions = { checkImgExtensions: '', disableRemoteSize: true }
+  assert.strictEqual(
+    mdit('commonmark').use(mditRendererImage, presetOptions).render('![Alt](cat.jpg)'),
+    '<p><img src="cat.jpg" alt="Alt" /></p>\n'
+  )
+  assert.strictEqual(
+    mdit('zero').use(mditRendererImage, presetOptions).render('![Alt](cat.jpg)'),
+    '<p>![Alt](cat.jpg)</p>\n'
+  )
+  let runtimeMdPathReads = 0
+  const runtimeMdPath = {
+    toString: () => {
+      runtimeMdPathReads += 1
+      return path.join(__dirname, 'test.md')
+    },
+  }
+  const mdLazyRuntimePath = mdit().use(mditRendererImage, {
+    disableRemoteSize: true,
+    suppressErrors: 'all',
+  })
+  mdLazyRuntimePath.render('![Alt](cat.svg)', { mdPath: runtimeMdPath })
+  mdLazyRuntimePath.render('![Alt](https://example.com/cat.jpg)', { mdPath: runtimeMdPath })
+  assert.strictEqual(runtimeMdPathReads, 0)
+  mdLazyRuntimePath.render('![Alt](cat.jpg)', { mdPath: runtimeMdPath })
+  assert.strictEqual(runtimeMdPathReads, 1)
+  const mdNonSizedAttributes = mdit().use(mditRendererImage, {
+    scaleSuffix: true,
+    lazyLoad: true,
+    asyncDecode: true,
+  })
+  assert.strictEqual(
+    mdNonSizedAttributes.render('![Alt](icon@2x.svg)'),
+    '<p><img src="icon@2x.svg" alt="Alt" data-img-scale-suffix="2x" decoding="async" loading="lazy"></p>\n'
+  )
   const originalConsoleWarn = console.warn
   const duplicateUseWarnings = []
   try {
@@ -71,12 +105,15 @@ try {
       urlImageBase: 'https://a.example/',
       mdPath: path.join(__dirname, 'test.md'),
     })
+    assert.throws(
+      () => mdDuplicateUse.use(mditRendererImage, { noUpscale: false }),
+      /noUpscale option was removed/
+    )
     mdDuplicateUse.use(mditRendererImage, {
       resolveSrc: true,
       disableRemoteSize: true,
       suppressErrors: 'all',
       lazyLoad: true,
-      noUpscale: false,
       urlImageBase: 'https://b.example/',
       mdPath: path.join(__dirname, 'test.md'),
     })

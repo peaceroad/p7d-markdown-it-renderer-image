@@ -234,6 +234,7 @@ Base URL selection order:
 Rules:
 - `lid` strips a local prefix from relative `src`.
 - Query/hash are preserved.
+- Absolute, protocol-relative, and other URI-scheme sources are preserved instead of being treated as local paths.
 
 Only `.html`, `.htm`, `.xhtml` are treated as file names when deriving URL path from `url`.
 
@@ -264,7 +265,7 @@ Probe URL (`loadSrc`) is decided in this order:
 3. Override by `loadSrcResolver` (if provided) or `loadSrcMap`
 
 Probe cache behavior:
-- `probeCacheMaxEntries > 0` enables cache.
+- `probeCacheMaxEntries > 0` permits persistent cache entries; each result kind is retained only when its corresponding TTL is also greater than `0`.
 - Success results are cached by effective `loadSrc` and use `probeCacheTtlMs`.
 - Failure/timeout results are policy-aware: they use `probeNegativeCacheTtlMs` at read time and are keyed by `loadSrc` plus current `sizeProbeTimeoutMs`.
 - In-flight probe requests for the same `loadSrc` plus current `sizeProbeTimeoutMs` are deduplicated, even when persistent cache entries are disabled.
@@ -286,6 +287,8 @@ Probe cache behavior:
 - `applyImageTransformsToString(html, contextOrOptions, markdownCont?)`
 - `startObserver(root, contextOrOptions, markdownCont?)`
 - `runInPreview({ root, markdownCont, observe, context, ...options })`
+
+Direct transforms accept detached image/container roots. MutationObserver processing filters disconnected stale nodes before invoking the transform API.
 
 ## Resize Hint Classification (DOM)
 

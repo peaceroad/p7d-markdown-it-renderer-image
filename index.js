@@ -14,11 +14,11 @@ import {
   normalizeOutputUrlMode,
   buildImageExtensionRegExp,
   getImageName,
-  getScaleSuffixValue,
+  getScaleSuffixInfo,
   isHttpUrl,
   isProtocolRelativeUrl,
   isFileUrl,
-  hasSpecialScheme,
+  hasUriScheme,
   stripQueryHash,
   applyOutputUrlMode,
   safeDecodeUri,
@@ -158,8 +158,6 @@ const resolveMdDir = (value) => {
 
 const getLocalImgSrc = (imgSrc, mdDir) => {
   if (!imgSrc) return ''
-  if (isProtocolRelativeUrl(imgSrc)) return ''
-  if (hasSpecialScheme(imgSrc)) return ''
   if (isFileUrl(imgSrc)) {
     try {
       return fileURLToPath(imgSrc)
@@ -221,12 +219,12 @@ const getImgData = (src, isRemote, timeout, cache, cacheMax, failedSet, suppress
 
 const mditRendererImage = (md, option) => {
   const safeOption = option && typeof option === 'object' ? { ...option } : null
+  if (safeOption && Object.prototype.hasOwnProperty.call(safeOption, 'noUpscale')) {
+    throw new Error('[renderer-image] noUpscale option was removed. Image sizes are always capped to intrinsic dimensions.')
+  }
   if (md?.[rendererImageInstalledKey]) {
     console.warn('[renderer-image] Plugin already installed on this markdown-it instance. Create a new instance to use different options.')
     return
-  }
-  if (safeOption && Object.prototype.hasOwnProperty.call(safeOption, 'noUpscale')) {
-    throw new Error('[renderer-image] noUpscale option was removed. Image sizes are always capped to intrinsic dimensions.')
   }
 
   const opt = { ...defaultNodeOptions }
@@ -282,30 +280,29 @@ const mditRendererImage = (md, option) => {
     writable: false,
   })
 
-  const processImageToken = (token, state, fmContext) => {
-    const { imgDataCache, failedImgLoads, missingMdPathWarnings } = state
-
+  const processImageToken = (token, fmContext, ensureRenderState, ensureRenderMdDir) => {
     const srcRaw = token.attrGet('src') || ''
     const srcBase = stripQueryHash(srcRaw)
     const srcSuffix = srcRaw.slice(srcBase.length)
     let src = srcBase
     const titleRaw = token.attrGet('title')
-    const warningKey = srcBase || srcRaw
+    const isProtocolRelative = isProtocolRelativeUrl(srcBase)
+    const hasScheme = !isProtocolRelative && hasUriScheme(srcBase)
+    const isRemote = isProtocolRelative || (hasScheme && isHttpUrl(srcBase))
+    const isFile = hasScheme && isFileUrl(srcBase)
+    const isLocal = !isProtocolRelative && !hasScheme
 
     const {
       parsedFrontmatter,
       imageScale,
       imageScaleResizeValue,
       shouldParseFrontmatter,
-      mdDir,
       imageBase,
     } = fmContext
 
     if (resolveSrcEnabled && src && shouldParseFrontmatter) {
       const { lid } = parsedFrontmatter
-      const isLocalSrc = !isHttpUrl(src) && !isProtocolRelativeUrl(src) && !isFileUrl(src) && !hasSpecialScheme(src)
-
-      if (isLocalSrc) {
+      if (isLocal) {
         if (lid) {
           if (src.startsWith(lid)) {
             src = src.substring(lid.length)
@@ -324,31 +321,41 @@ const mditRendererImage = (md, option) => {
     const finalSrc = applyOutputUrlMode(safeDecodeUri(resolvedSrc), outputUrlMode)
 
     const isValidExt = imgExtReg.test(srcBase)
-    const isRemote = isHttpUrl(srcBase) || isProtocolRelativeUrl(srcBase)
-    const isFile = isFileUrl(srcBase)
+    let imgName = ''
+    let scaleSuffixInfo = null
+    if (scaleSuffixEnabled) {
+      imgName = getImageName(srcBase)
+      scaleSuffixInfo = getScaleSuffixInfo(imgName)
+    }
+    const scaleSuffixValue = scaleSuffixInfo?.value || ''
+    if (scaleSuffixValue) token.attrSet(defaultScaleSuffixDataAttr, scaleSuffixValue)
+    else removeTokenAttr(token, defaultScaleSuffixDataAttr)
 
     if (isValidExt) {
-      const imgName = getImageName(srcBase)
-      const scaleSuffixValue = scaleSuffixEnabled ? getScaleSuffixValue(imgName) : ''
-      if (scaleSuffixValue) token.attrSet(defaultScaleSuffixDataAttr, scaleSuffixValue)
-      else removeTokenAttr(token, defaultScaleSuffixDataAttr)
+      const warningKey = srcBase || srcRaw
+      if (!imgName) imgName = getImageName(srcBase)
       let srcPath = ''
       if (isRemote) {
         if (remoteSizeEnabled) {
           srcPath = srcRaw
         }
-      } else {
-        srcPath = getLocalImgSrc(srcBase, mdDir)
+      } else if (isLocal || isFile) {
+        srcPath = getLocalImgSrc(srcBase, isLocal ? ensureRenderMdDir() : '')
       }
 
-      if (!srcPath && !isRemote && !isFile && !missingMdPathWarnings.has(warningKey) && !globalMissingMdPathWarnings.has(warningKey)) {
-        console.warn(`[renderer-image] Set mdPath in options or env to read local image dimensions: ${srcRaw}`)
-        missingMdPathWarnings.add(warningKey)
-        addToBoundedSet(globalMissingMdPathWarnings, warningKey)
+      if (!srcPath && isLocal) {
+        const { missingMdPathWarnings } = ensureRenderState()
+        if (!missingMdPathWarnings.has(warningKey) && !globalMissingMdPathWarnings.has(warningKey)) {
+          console.warn(`[renderer-image] Set mdPath in options or env to read local image dimensions: ${srcRaw}`)
+          missingMdPathWarnings.add(warningKey)
+          addToBoundedSet(globalMissingMdPathWarnings, warningKey)
+        }
       }
 
-      const imgData = srcPath
-        ? getImgData(
+      let imgData = emptyImgData
+      if (srcPath) {
+        const { imgDataCache, failedImgLoads } = ensureRenderState()
+        imgData = getImgData(
           srcPath,
           isRemote,
           remoteTimeout,
@@ -360,15 +367,13 @@ const mditRendererImage = (md, option) => {
           suppressRemoteErrors,
           remoteMaxBytes
         )
-        : emptyImgData
+      }
 
       if (imgData?.width !== undefined) {
-        const { width, height } = setImgSize(imgName, imgData, scaleSuffixEnabled, resizeEnabled, titleRaw, imageScale, conditionalResize)
+        const { width, height } = setImgSize(imgName, imgData, scaleSuffixEnabled, resizeEnabled, titleRaw, imageScale, conditionalResize, scaleSuffixInfo)
         token.attrSet('width', width)
         token.attrSet('height', height)
       }
-    } else {
-      removeTokenAttr(token, defaultScaleSuffixDataAttr)
     }
 
     token.attrSet('src', finalSrc)
@@ -391,14 +396,16 @@ const mditRendererImage = (md, option) => {
       if (effectiveResizeOrigin) token.attrSet(resizeOriginDataAttr, effectiveResizeOrigin)
       else removeTokenAttr(token, resizeOriginDataAttr)
     }
-    if (isValidExt && asyncDecodeEnabled) token.attrSet('decoding', 'async')
-    if (isValidExt && lazyLoadEnabled) token.attrSet('loading', 'lazy')
+    if (asyncDecodeEnabled) token.attrSet('decoding', 'async')
+    if (lazyLoadEnabled) token.attrSet('loading', 'lazy')
   }
 
   md.core.ruler.after('replacements', 'renderer_image', (state) => {
     const tokens = state.tokens || []
     let renderState = null
     let fmContext = null
+    let renderMdDir = resolvedOptMdDir
+    let renderMdDirResolved = hasOptMdPath
 
     const ensureRenderState = () => {
       if (renderState) return renderState
@@ -410,16 +417,20 @@ const mditRendererImage = (md, option) => {
       return renderState
     }
 
+    const ensureRenderMdDir = () => {
+      if (renderMdDirResolved) return renderMdDir
+      const envMdPath = state?.env?.mdPath
+      renderMdDir = envMdPath ? resolveMdDir(envMdPath) : ''
+      renderMdDirResolved = true
+      return renderMdDir
+    }
+
     const ensureFrontmatterContext = () => {
       if (fmContext) return fmContext
-      const env = state?.env || {}
-      const mdDir = hasOptMdPath
-        ? resolvedOptMdDir
-        : (env?.mdPath ? resolveMdDir(env.mdPath) : '')
       const frontmatter = resolveRenderFrontmatter(state, md)
       const hasFrontmatter = hasOwnEnumerableKeys(frontmatter)
       const shouldParseFrontmatter = hasFrontmatter || hasOptUrlImageBase
-      const parsedFrontmatter = shouldParseFrontmatter
+      const parsedFrontmatter = hasFrontmatter
         ? (getFrontmatter(frontmatter || {}, {
           onWarning: (message) => console.warn(`[renderer-image] ${message}`),
         }) || {})
@@ -440,7 +451,6 @@ const mditRendererImage = (md, option) => {
         imageScale,
         imageScaleResizeValue,
         imageBase,
-        mdDir,
       }
       return fmContext
     }
@@ -452,7 +462,7 @@ const mditRendererImage = (md, option) => {
       for (let childIndex = 0; childIndex < children.length; childIndex += 1) {
         const child = children[childIndex]
         if (child.type === 'image') {
-          processImageToken(child, ensureRenderState(), ensureFrontmatterContext())
+          processImageToken(child, ensureFrontmatterContext(), ensureRenderState, ensureRenderMdDir)
         }
       }
     }

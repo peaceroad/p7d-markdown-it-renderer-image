@@ -65,11 +65,12 @@ const httpUrlReg = /^https?:\/\//i
 const protocolRelativeReg = /^\/\//
 const fileUrlReg = /^file:\/\//i
 const urlSchemeReg = /^[a-z][a-z0-9+.-]*:\/\//i
+const uriSchemeReg = /^[a-z][a-z0-9+.-]*:/i
 const specialSchemeReg = /^(data|blob|vscode-resource|vscode-webview-resource|vscode-file):/i
-const windowsAbsolutePathReg = /^[A-Za-z]:\//
+const windowsAbsolutePathReg = /^[A-Za-z]:[\\/]/
 const absoluteUrlReg = /^(?:[a-z][a-z0-9+.-]*:)?\/\//i
 const htmlFileReg = /\.(html|htm|xhtml)$/i
-const urlPathReg = /^([a-z]+:\/\/)(.*)/
+const urlPathReg = /^([a-z][a-z0-9+.-]*:\/\/)(.*)/i
 const neverMatchReg = /a^/
 const allowedOutputUrlModes = Object.freeze(new Set(['absolute', 'protocol-relative', 'path-only']))
 const slashCharCode = 47
@@ -282,6 +283,10 @@ const isHttpUrl = (value) => httpUrlReg.test(toText(value))
 const isProtocolRelativeUrl = (value) => protocolRelativeReg.test(toText(value))
 const isFileUrl = (value) => fileUrlReg.test(toText(value))
 const hasUrlScheme = (value) => urlSchemeReg.test(toText(value))
+const hasUriScheme = (value) => {
+  const text = toText(value)
+  return !!text && !windowsAbsolutePathReg.test(text) && uriSchemeReg.test(text)
+}
 const hasSpecialScheme = (value) => specialSchemeReg.test(toText(value))
 const isAbsolutePath = (value) => {
   const text = toText(value)
@@ -328,40 +333,50 @@ const startsWithYamlFrontmatter = (value) => {
     || text.startsWith(yamlFrontmatterFenceCrLf)
 }
 
-const normalizeRelativePath = (path) => {
-  const text = toText(path)
-  if (!text) return text
-  const urlSchemeMatch = text.match(urlPathReg)
-  if (urlSchemeMatch) {
-    const scheme = urlSchemeMatch[1]
-    const pathPart = urlSchemeMatch[2]
-    return scheme + normalizeRelativePath(pathPart)
-  }
-  if (!needsPathNormalization(text)) return text
-  
-  const isAbsolute = text.startsWith('/')
-  const segments = text.split('/')
+const normalizePathPart = (value, isAbsolute) => {
+  const segments = value.split('/')
   const normalized = []
-  
+
   for (const segment of segments) {
-    if (segment === '.' || (segment === '' && !isAbsolute)) {
-      continue
-    } else if (segment === '' && isAbsolute && normalized.length === 0) {
-      // Keep the first empty segment for absolute paths to preserve leading slash
-      normalized.push(segment)
-    } else if (segment === '..') {
+    if (!segment || segment === '.') continue
+    if (segment === '..') {
       if (normalized.length > 0 && normalized[normalized.length - 1] !== '..') {
         normalized.pop()
       } else if (!isAbsolute) {
-        // Keep leading .. segments for relative paths only
         normalized.push(segment)
       }
-    } else if (segment !== '') {
-      normalized.push(segment)
+      continue
     }
+    normalized.push(segment)
   }
-  
-  return normalized.join('/')
+
+  const joined = normalized.join('/')
+  return isAbsolute ? `/${joined}` : joined
+}
+
+const normalizeAbsoluteUrlPath = (prefix, remainder, suffix) => {
+  const pathStart = remainder.indexOf('/')
+  if (pathStart < 0) return prefix + remainder + suffix
+  const authority = remainder.slice(0, pathStart)
+  const pathPart = remainder.slice(pathStart)
+  if (!needsPathNormalization(pathPart)) return prefix + remainder + suffix
+  return prefix + authority + normalizePathPart(pathPart, true) + suffix
+}
+
+const normalizeRelativePath = (path) => {
+  const text = toText(path)
+  if (!text) return text
+  const clean = stripQueryHash(text)
+  const suffix = text.slice(clean.length)
+  const urlSchemeMatch = clean.match(urlPathReg)
+  if (urlSchemeMatch) {
+    return normalizeAbsoluteUrlPath(urlSchemeMatch[1], urlSchemeMatch[2], suffix)
+  }
+  if (clean.startsWith('//')) {
+    return normalizeAbsoluteUrlPath('//', clean.slice(2), suffix)
+  }
+  if (!needsPathNormalization(clean)) return text
+  return normalizePathPart(clean, clean.startsWith('/')) + suffix
 }
 
 const ensureTrailingSlash = (value) => {
@@ -374,8 +389,12 @@ const getUrlPath = (value) => {
   const text = toText(value)
   if (!text) return ''
   const clean = stripQueryHash(text)
+  const urlTarget = isProtocolRelativeUrl(clean)
+    ? `https:${clean}`
+    : (hasUrlScheme(clean) ? clean : '')
+  if (!urlTarget) return normalizeUrlPath(clean)
   try {
-    const parsed = new URL(clean)
+    const parsed = new URL(urlTarget)
     return normalizeUrlPath(parsed.pathname)
   } catch {
     return normalizeUrlPath(clean)
@@ -591,14 +610,16 @@ const getScaleSuffixValue = (imgName) => {
   return info ? info.value : ''
 }
 
-const setImgSize = (imgName, imgData, scaleSuffix, resize, title, imageScale, conditionalResize = null) => {
+const setImgSize = (imgName, imgData, scaleSuffix, resize, title, imageScale, conditionalResize = null, precomputedScaleSuffixInfo = undefined) => {
   if (!imgData) return {}
   const originalWidth = imgData.width
   const originalHeight = imgData.height
   let w = originalWidth
   let h = originalHeight
   if (scaleSuffix) {
-    const suffixInfo = getScaleSuffixInfo(imgName)
+    const suffixInfo = precomputedScaleSuffixInfo === undefined
+      ? getScaleSuffixInfo(imgName)
+      : precomputedScaleSuffixInfo
     if (suffixInfo) {
       const { scale, unit } = suffixInfo
       if (unit === 'x') {
@@ -705,7 +726,9 @@ const getFrontmatter = (frontmatter, option = {}) => {
     if (!lmd.endsWith('/')) lmd += '/'
   }
   const imageScale = parseImageScale(resolvedImageScale.value)
-  const imageScaleResizeValue = getImageScaleResizeValue(resolvedImageScale.value)
+  const imageScaleResizeValue = Number.isFinite(imageScale) && imageScale > 0
+    ? formatPercent(imageScale * 100)
+    : ''
   return { url, urlimage, urlimagebase, lid, lmd, imageScale, imageScaleResizeValue }
 }
 
@@ -963,14 +986,14 @@ const normalizeProbeTimeoutKeyPart = (value) => {
   if (!Number.isFinite(value) || value <= 0) return '0'
   return String(Math.floor(value))
 }
-const getProbeCacheKeys = (loadSrc, timeoutMs) => {
+const getProbeCacheKeys = (loadSrc, timeoutPart, includeSuccessKey, includeNegativeKey) => {
   const normalizedSrc = String(loadSrc || '')
-  const timeoutPart = normalizeProbeTimeoutKeyPart(timeoutMs)
-  return {
-    successKey: `success:${normalizedSrc}`,
-    negativeKey: `negative:${timeoutPart}:${normalizedSrc}`,
+  const keys = {
     inFlightKey: `flight:${timeoutPart}:${normalizedSrc}`,
   }
+  if (includeSuccessKey) keys.successKey = `success:${normalizedSrc}`
+  if (includeNegativeKey) keys.negativeKey = `negative:${timeoutPart}:${normalizedSrc}`
+  return keys
 }
 const getProbeCacheState = (context, root, images = null) => {
   if (!context || !context.opt) return null
@@ -1038,6 +1061,7 @@ const sharedContextUtils = Object.freeze({
   isProtocolRelativeUrl,
   isFileUrl,
   hasUrlScheme,
+  hasUriScheme,
   hasSpecialScheme,
   stripQueryHash,
   getImageName,
@@ -1162,13 +1186,14 @@ const createContext = async (markdownCont = '', option = {}, root = null) => {
     || (extensionSettings?.rendererImage
       && Object.prototype.hasOwnProperty.call(extensionSettings.rendererImage, 'enableSizeProbe'))
   if (extensionSettings) {
+    if (extensionSettings.rendererImage
+        && Object.prototype.hasOwnProperty.call(extensionSettings.rendererImage, 'noUpscale')) {
+      failRemovedNoUpscaleOption()
+    }
     if (extensionSettings.notSetImageElementAttributes || extensionSettings.disableRendererImage) {
       return { skip: true, opt: currentOpt }
     }
     if (extensionSettings.rendererImage) {
-      if (Object.prototype.hasOwnProperty.call(extensionSettings.rendererImage, 'noUpscale')) {
-        failRemovedNoUpscaleOption()
-      }
       applyRendererOptions(currentOpt, extensionSettings.rendererImage, optionOverrides)
     }
   }
@@ -1225,7 +1250,7 @@ const createContext = async (markdownCont = '', option = {}, root = null) => {
   let adjustedLmd = ''
   if (resolveSrcEnabled && lmd) {
     adjustedLmd = String(lmd).replace(/\\/g, '/')
-    if (!isProtocolRelativeUrl(adjustedLmd) && !isFileUrl(adjustedLmd) && !hasUrlScheme(adjustedLmd) && !hasSpecialScheme(adjustedLmd)) {
+    if (!isProtocolRelativeUrl(adjustedLmd) && !isFileUrl(adjustedLmd) && !hasUriScheme(adjustedLmd)) {
       if (isAbsolutePath(adjustedLmd)) {
         adjustedLmd = toFileUrl(adjustedLmd)
       }
@@ -1308,7 +1333,7 @@ const applyImageTransforms = async (root, contextOrOptions = {}, markdownCont = 
     isHttpUrl,
     isProtocolRelativeUrl,
     isFileUrl,
-    hasSpecialScheme,
+    hasUriScheme,
     stripQueryHash,
     getImageName,
     applyOutputUrlMode,
@@ -1317,8 +1342,6 @@ const applyImageTransforms = async (root, contextOrOptions = {}, markdownCont = 
   const images = collectImages(root)
   const summary = createSummary(images.length)
   if (images.length === 0) return summary
-  const probeCacheState = getProbeCacheState(context, root, images)
-  const inFlightProbeState = probeCacheState?.inFlight || new Map()
   const probeCacheMaxEntries = currentOpt.probeCacheMaxEntries
   const probeCacheTtlMs = currentOpt.probeCacheTtlMs
   const probeNegativeCacheTtlMs = currentOpt.probeNegativeCacheTtlMs
@@ -1347,6 +1370,23 @@ const applyImageTransforms = async (root, contextOrOptions = {}, markdownCont = 
   const tracksResizeHintState = !!(resizeEnabled && (keepPreviousDimensionsDuringResizeEdit || hasResizeHintEditingStateHook))
   const suppressLocalByMode = suppressErrorMode === 'local'
   const suppressRemoteByMode = suppressErrorMode === 'remote'
+  const successProbeCacheEnabled = probeCacheMaxEntries > 0 && probeCacheTtlMs > 0
+  const negativeProbeCacheEnabled = probeCacheMaxEntries > 0 && probeNegativeCacheTtlMs > 0
+  const probeCacheEnabled = successProbeCacheEnabled || negativeProbeCacheEnabled
+  const probeTimeoutKeyPart = normalizeProbeTimeoutKeyPart(currentOpt.sizeProbeTimeoutMs)
+  const probeCacheTtlConfig = probeCacheEnabled
+    ? {
+      successTtlMs: probeCacheTtlMs,
+      negativeTtlMs: probeNegativeCacheTtlMs,
+    }
+    : null
+  let probeCacheState = null
+  let inFlightProbeState = null
+  const ensureProbeCacheState = () => {
+    if (probeCacheState) return
+    probeCacheState = getProbeCacheState(context, root, images)
+    inFlightProbeState = probeCacheState.inFlight
+  }
 
   const emitImageProcessed = (img, status, width, height, loadSrc, finalSrc, displaySrc) => {
     if (!hasImageProcessedHook) return
@@ -1372,7 +1412,7 @@ const applyImageTransforms = async (root, contextOrOptions = {}, markdownCont = 
       height: readPositiveIntAttr(img, 'height'),
     })
   }
-  const applyProbeResultToImage = (img, imgName, resizeTitleForSize, loadSrc, finalSrc, displaySrc, probeResult) => {
+  const applyProbeResultToImage = (img, imgName, scaleSuffixInfo, resizeTitleForSize, loadSrc, finalSrc, displaySrc, probeResult) => {
     let status = probeResult?.status || 'failed'
     let width = 0
     let height = 0
@@ -1390,7 +1430,8 @@ const applyImageTransforms = async (root, contextOrOptions = {}, markdownCont = 
           resizeEnabled,
           resizeTitleForSize,
           imageScale,
-          conditionalResize
+          conditionalResize,
+          scaleSuffixInfo
         )
         width = sized.width
         height = sized.height
@@ -1407,18 +1448,17 @@ const applyImageTransforms = async (root, contextOrOptions = {}, markdownCont = 
     return new Promise((resolve) => {
       let settled = false
       let timeoutId = null
+      const originalImage = new Image()
       const done = (status, naturalWidth = 0, naturalHeight = 0) => {
         if (settled) return
         settled = true
-        if (timeoutId) clearTimeout(timeoutId)
+        if (timeoutId != null) clearTimeout(timeoutId)
         resolve({
           status,
           naturalWidth,
           naturalHeight,
         })
       }
-
-      const originalImage = new Image()
       originalImage.onload = () => {
         if (settled) return
         if (!originalImage.naturalWidth || !originalImage.naturalHeight) {
@@ -1454,13 +1494,16 @@ const applyImageTransforms = async (root, contextOrOptions = {}, markdownCont = 
   }
   const resolveProbeResult = (loadSrc, suppressLoadErrors) => {
     if (!loadSrc) return Promise.resolve(emptyProbeResult)
-    const cacheKeys = getProbeCacheKeys(loadSrc, currentOpt.sizeProbeTimeoutMs)
-    if (probeCacheState && probeCacheMaxEntries > 0) {
+    ensureProbeCacheState()
+    const cacheKeys = getProbeCacheKeys(
+      loadSrc,
+      probeTimeoutKeyPart,
+      successProbeCacheEnabled,
+      negativeProbeCacheEnabled
+    )
+    if (probeCacheEnabled) {
       const cacheCheckAt = Date.now()
-      const cached = getCachedProbeResult(probeCacheState, cacheKeys, {
-        successTtlMs: probeCacheTtlMs,
-        negativeTtlMs: probeNegativeCacheTtlMs,
-      }, cacheCheckAt)
+      const cached = getCachedProbeResult(probeCacheState, cacheKeys, probeCacheTtlConfig, cacheCheckAt)
       if (cached) return Promise.resolve(cached)
     }
     const inFlight = inFlightProbeState.get(cacheKeys.inFlightKey)
@@ -1468,7 +1511,10 @@ const applyImageTransforms = async (root, contextOrOptions = {}, markdownCont = 
 
     const promise = loadImageProbeResult(loadSrc, suppressLoadErrors)
       .then((result) => {
-        if (probeCacheState && probeCacheMaxEntries > 0) {
+        const shouldCacheResult = result.status === 'sized'
+          ? successProbeCacheEnabled
+          : negativeProbeCacheEnabled
+        if (shouldCacheResult) {
           const cacheWriteAt = Date.now()
           setCachedProbeResult(
             probeCacheState,
@@ -1486,9 +1532,10 @@ const applyImageTransforms = async (root, contextOrOptions = {}, markdownCont = 
     inFlightProbeState.set(cacheKeys.inFlightKey, promise)
     return promise
   }
-  const probeImage = (img, loadSrc, sizeSrc, resizeTitleForSize, finalSrc, displaySrc) => {
+  const probeImage = (img, loadSrc, sizeSrc, scaleSuffixInfo, resizeTitleForSize, finalSrc, displaySrc) => {
     const imgName = getImageName(sizeSrc)
-    const isRemoteForError = isHttpUrl(loadSrc) || isProtocolRelativeUrl(loadSrc)
+    const isRemoteForError = isProtocolRelativeUrl(loadSrc)
+      || (hasUriScheme(loadSrc) && !isFileUrl(loadSrc))
     const suppressLoadErrors = suppressAllErrors
       || (isRemoteForError ? suppressRemoteByMode : suppressLocalByMode)
 
@@ -1496,6 +1543,7 @@ const applyImageTransforms = async (root, contextOrOptions = {}, markdownCont = 
       .then((probeResult) => applyProbeResultToImage(
         img,
         imgName,
+        scaleSuffixInfo,
         resizeTitleForSize,
         loadSrc,
         finalSrc,
@@ -1512,10 +1560,6 @@ const applyImageTransforms = async (root, contextOrOptions = {}, markdownCont = 
 
   for (const img of images) {
     if (!img) continue
-    if (typeof img.isConnected === 'boolean' && !img.isConnected) {
-      summary.skipped += 1
-      continue
-    }
     summary.processed += 1
 
     const currentSrcAttr = getAttr(img, 'src')
@@ -1525,10 +1569,8 @@ const applyImageTransforms = async (root, contextOrOptions = {}, markdownCont = 
     const srcRaw = useStored ? storedOriginalSrc : currentSrcAttr
     const srcBase = stripQueryHash(srcRaw)
     const srcSuffix = srcRaw.slice(srcBase.length)
-    const isLocalSrc = !isHttpUrl(srcRaw)
-      && !isProtocolRelativeUrl(srcRaw)
-      && !isFileUrl(srcRaw)
-      && !hasSpecialScheme(srcRaw)
+    const isLocalSrc = !isProtocolRelativeUrl(srcRaw)
+      && !hasUriScheme(srcRaw)
 
     let src = srcBase
     let finalSrc = ''
@@ -1621,8 +1663,6 @@ const applyImageTransforms = async (root, contextOrOptions = {}, markdownCont = 
       resizeHintStateByImage.delete(img)
     }
 
-    const alt = img.alt
-    if (alt) setAttrIfChanged(img, 'alt', alt)
     let titleAttr = getAttr(img, 'title')
     const autoHiddenResizeTitle = autoHiddenResizeTitleByImage.get(img) || null
     if (autoHiddenResizeTitle && titleAttr && titleAttr !== autoHiddenResizeTitle.title) {
@@ -1715,19 +1755,22 @@ const applyImageTransforms = async (root, contextOrOptions = {}, markdownCont = 
       autoHiddenResizeTitleByImage.delete(img)
     }
     let managedSupplementalState = managedSupplementalAttrsByImage.get(img)
-    if (!managedSupplementalState) {
-      managedSupplementalState = { decoding: false, loading: false }
-    }
-    syncManagedAttr(img, managedSupplementalState, 'decoding', asyncDecodeEnabled, 'async', 'decoding')
-    syncManagedAttr(img, managedSupplementalState, 'loading', lazyLoadEnabled, 'lazy', 'loading')
-    if (managedSupplementalState.decoding || managedSupplementalState.loading) {
-      managedSupplementalAttrsByImage.set(img, managedSupplementalState)
-    } else {
-      managedSupplementalAttrsByImage.delete(img)
+    if (asyncDecodeEnabled || lazyLoadEnabled || managedSupplementalState) {
+      if (!managedSupplementalState) {
+        managedSupplementalState = { decoding: false, loading: false }
+      }
+      syncManagedAttr(img, managedSupplementalState, 'decoding', asyncDecodeEnabled, 'async', 'decoding')
+      syncManagedAttr(img, managedSupplementalState, 'loading', lazyLoadEnabled, 'lazy', 'loading')
+      if (managedSupplementalState.decoding || managedSupplementalState.loading) {
+        managedSupplementalAttrsByImage.set(img, managedSupplementalState)
+      } else {
+        managedSupplementalAttrsByImage.delete(img)
+      }
     }
 
     const sizeSrc = finalSrc || srcRaw || loadSrc
-    const scaleSuffixValue = scaleSuffixEnabled ? getScaleSuffixValue(getImageName(sizeSrc)) : ''
+    const scaleSuffixInfo = scaleSuffixEnabled ? getScaleSuffixInfo(getImageName(sizeSrc)) : null
+    const scaleSuffixValue = scaleSuffixInfo?.value || ''
     if (scaleSuffixDataAttr) {
       if (scaleSuffixValue) setAttrIfChanged(img, scaleSuffixDataAttr, scaleSuffixValue)
       else removeAttrIfPresent(img, scaleSuffixDataAttr)
@@ -1759,7 +1802,7 @@ const applyImageTransforms = async (root, contextOrOptions = {}, markdownCont = 
       continue
     }
 
-    const promise = probeImage(img, loadSrc, sizeSrc, resizeTitleForSize, finalSrc, displaySrc).then((status) => {
+    const promise = probeImage(img, loadSrc, sizeSrc, scaleSuffixInfo, resizeTitleForSize, finalSrc, displaySrc).then((status) => {
       if (status === 'sized') summary.sized += 1
       else if (status === 'timeout') summary.timeout += 1
       else if (status === 'failed') summary.failed += 1
@@ -1804,6 +1847,12 @@ const startObserver = async (root, contextOrOptions = {}, markdownCont = '') => 
   const pendingImages = new Set()
   const rootNode = root.documentElement || root.body || root
   const metaObserverTarget = resolveMetaObserverTarget(root)
+  const isWithinObservedRoot = (img) => {
+    if (rootNode && typeof rootNode.contains === 'function') {
+      return rootNode === img || rootNode.contains(img)
+    }
+    return typeof img?.isConnected !== 'boolean' || img.isConnected
+  }
   const observerOptionsBase = {
     childList: true,
     subtree: true,
@@ -1868,7 +1917,9 @@ const startObserver = async (root, contextOrOptions = {}, markdownCont = '') => 
         if (disposed) break
         pending = false
         const useAll = pendingAll
-        const targets = useAll ? root : Array.from(pendingImages)
+        const targets = useAll
+          ? root
+          : Array.from(pendingImages).filter(isWithinObservedRoot)
         pendingAll = false
         pendingImages.clear()
         if (!useAll && targets.length === 0) continue
@@ -1933,10 +1984,13 @@ const startObserver = async (root, contextOrOptions = {}, markdownCont = '') => 
         pendingImages.add(node)
         continue
       }
-      if (node.querySelectorAll) {
-        const images = typeof node.getElementsByTagName === 'function'
-          ? node.getElementsByTagName('img')
-          : node.querySelectorAll('img')
+      let images = null
+      if (typeof node.getElementsByTagName === 'function') {
+        images = node.getElementsByTagName('img')
+      } else if (typeof node.querySelectorAll === 'function') {
+        images = node.querySelectorAll('img')
+      }
+      if (images) {
         for (const image of images) pendingImages.add(image)
       }
     }
@@ -2029,18 +2083,18 @@ const startObserver = async (root, contextOrOptions = {}, markdownCont = '') => 
  */
 const runInPreview = async (setup = {}) => {
   const safeSetup = setup && typeof setup === 'object' ? setup : {}
-  const root = safeSetup.root
+  const {
+    root,
+    markdownCont: markdownValue,
+    observe: observeValue,
+    context: contextValue,
+    ...option
+  } = safeSetup
   if (!root) throw new Error('[renderer-image(dom)] runInPreview requires root.')
 
-  const markdownCont = typeof safeSetup.markdownCont === 'string' ? safeSetup.markdownCont : ''
-  const observe = !!safeSetup.observe
-  const providedContext = safeSetup.context && safeSetup.context.opt ? safeSetup.context : null
-
-  const option = { ...safeSetup }
-  delete option.root
-  delete option.markdownCont
-  delete option.observe
-  delete option.context
+  const markdownCont = typeof markdownValue === 'string' ? markdownValue : ''
+  const observe = !!observeValue
+  const providedContext = contextValue && contextValue.opt ? contextValue : null
 
   const context = providedContext || await createContext(markdownCont, option, root)
   const summary = await applyImageTransforms(root, context)
@@ -2069,6 +2123,9 @@ const shouldSuppressNoopWarning = (option) => {
   return false
 }
 const mditRendererImageBrowser = (_md, _option) => {
+  if (_option && Object.prototype.hasOwnProperty.call(_option, 'noUpscale')) {
+    failRemovedNoUpscaleOption()
+  }
   if (warnedDefaultExport || shouldSuppressNoopWarning(_option)) return Promise.resolve()
   if (typeof console !== 'undefined' && console && typeof console.warn === 'function') {
     console.warn('[renderer-image(dom)] Default export is a no-op in the browser. Use createContext/applyImageTransforms/startObserver/runInPreview instead.')

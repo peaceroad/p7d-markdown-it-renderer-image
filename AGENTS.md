@@ -8,8 +8,8 @@
    - If `resolveSrc` and frontmatter (or `urlImageBase` option) exist: normalize frontmatter aliases (`page.url` / `images.baseUrl` / `images.stripLocalPrefix` / `local.markdownDir` / `images.scale`, plus legacy flat keys), strip `lid`, build image base (`images.dirUrl` or absolute `urlimage` > `urlimagebase` + url path > `url`), normalize; keep query/hash.
    - Node frontmatter precedence: `env.frontmatter` first; otherwise use `md.frontmatter` / `md.meta` only when the current source starts with YAML frontmatter. Do not rely on `md.env.frontmatter`.
    - Apply `outputUrlMode` to final URL.
-   - Set final `src`/`alt`/`title`. Emit effective resize metadata in `resizeDataAttr` (default `data-img-resize`); emit `${resizeDataAttr}-origin` only for `imagescale`-derived values. Title is removed only when `autoHideResizeTitle` + `resize` + resize-pattern match. Emit `data-img-scale-suffix` when filename scale suffix metadata is available. Optional `decoding`/`loading`.
-   - If extension allowed: resolve path (remote vs local via mdPath, which can be a file path or a directory), warn once when mdPath missing, skip remote if `disableRemoteSize`.
+   - Set final `src`/`alt`/`title`. Emit effective resize metadata in `resizeDataAttr` (default `data-img-resize`); emit `${resizeDataAttr}-origin` only for `imagescale`-derived values. Title is removed only when `autoHideResizeTitle` + `resize` + resize-pattern match. Emit `data-img-scale-suffix` when filename scale suffix metadata is available. Optional `decoding`/`loading` and suffix metadata are independent of the sizing extension allowlist.
+   - If extension allowed: resolve path (remote vs local via mdPath, which can be a file path or a directory), warn once when mdPath missing, skip remote if `disableRemoteSize`. Runtime `env.mdPath` resolution and per-render sizing state are lazy and are not created for unsupported extensions or skipped remote/external sources.
    - Load dimensions via `image-size` (local) or `sync-fetch` + `image-size` (remote); protocol-relative remote URLs try `https:` first and `http:` second for measurement only. Respect `remoteMaxBytes` when content-length is present and before decoding downloaded buffers. Per-render cache; global sets de-duplicate errors/warnings. `cacheMax` 0 disables cache.
    - Apply `setImgSize` (scaleSuffix, resize via title, `imagescale`, optional `conditionalResize`, noUpscale always on) and set width/height.
 4. Frontmatter resolution and base URL are cached per render to avoid recompute.
@@ -22,7 +22,7 @@
    - Default export is a no-op shim returning `Promise.resolve()`; `suppressNoopWarning` silences the browser warning.
 2. `createContext(markdownCont, options, root)` parses options and YAML frontmatter (legacy flat keys plus dotted keys and simple nested object forms) and optionally reads `meta[name="markdown-frontmatter"]` when `readMeta: true` (merging `_extensionSettings.rendererImage` unless disabled).
 3. `applyImageTransforms(root, contextOrOptions)`:
-   - `root` accepts a document/container, a single `<img>`, or an iterable of `<img>` elements.
+   - `root` accepts a document/container, a single `<img>`, or an iterable of `<img>` elements, including detached nodes for direct transforms.
    - Applies path rewriting when `resolveSrc: true`, using image base (`images.dirUrl` or absolute `urlimage` > `urlimagebase` + url path > `url`, with `urlImageBase` option as fallback). Non-absolute `images.dirUrl` / `urlimage` values are ignored with a warning.
    - `lmd` handling: keep existing URL schemes; if `lmd` is an absolute local path, convert to `file:///` with URL-encoded segments and a trailing slash; relative `lmd` stays relative.
    - `previewMode`: `output` | `markdown` | `local`. When not `output`, store final URL in `previewOutputSrcAttr` and cache original `src` in `data-img-src-raw`; when `setDomSrc: true`, reused `<img>` nodes also track the helper-managed display `src` so external `src` edits are picked up instead of reusing stale raw values.
@@ -32,7 +32,7 @@
    - `loadSrcStrategy` chooses the probe source (`output` | `raw` | `display`).
    - `loadSrcPrefixMap` rewrites probe URLs by prefix (JSON-friendly).
    - `loadSrcResolver` / `loadSrcMap` can override the measurement source (`loadSrc`) for size calculation.
-   - Optional probe cache across apply runs: `probeCacheMaxEntries` (bounded cache size), `probeCacheTtlMs` (success TTL), `probeNegativeCacheTtlMs` (failed/timeout TTL). Success cache is keyed by effective `loadSrc`; failed/timeout cache and in-flight probe requests are keyed by `loadSrc` plus current `sizeProbeTimeoutMs`.
+   - Optional probe cache across apply runs: `probeCacheMaxEntries` (bounded cache size), `probeCacheTtlMs` (success TTL), `probeNegativeCacheTtlMs` (failed/timeout TTL). A result kind is stored only when its TTL is greater than zero. Success cache is keyed by effective `loadSrc`; failed/timeout cache and in-flight probe requests are keyed by `loadSrc` plus current `sizeProbeTimeoutMs`.
    - Returns a summary object `{ total, processed, pending, sized, failed, timeout, skipped }` and optionally calls `onImageProcessed(img, info)` per image.
    - `onResizeHintEditingStateChange(img, info)` is called on resize-hint state transitions only (`previousState` is `null` on first emit).
    - Uses `awaitSizeProbes` and `sizeProbeTimeoutMs` to control async sizing.
@@ -40,7 +40,7 @@
 5. `startObserver(root, contextOrOptions)` runs a MutationObserver and re-applies transforms; returns `{ disconnect }`.
    - `observeAttributeFilter` customizes which image attributes are observed (default `src/title/alt`).
    - `observeDebounceMs` adds quiet-period debounce in addition to existing rAF batching.
-   - When `readMeta` changes observer-related options, observer registration is refreshed to keep attributeFilter behavior consistent.
+   - When `readMeta` changes observer-related options, observer registration is refreshed to keep attributeFilter behavior consistent. Observer batches discard disconnected stale nodes before invoking the reusable transform API.
    - If a prebuilt context is passed, observer re-creation uses the original option seed (`context.seedOption`) so runtime meta options are not accidentally frozen as explicit overrides.
 
 ## Output Metadata (`data-*`)
@@ -55,6 +55,7 @@
 - `conditionalResize` is a shared option-level size policy. It supports `orientation: 'portrait' | 'landscape'`, minimum width/height thresholds, and exactly one of `targetWidth` or `targetHeight`.
 - Frontmatter alias normalization accepts dotted keys first, nested object keys second, and legacy flat keys third; conflicts warn and invalid non-absolute `images.dirUrl` / `urlimage` values are ignored. Relative or empty `urlimage` values are not treated as subdirectory hints.
 - Frontmatter normalization removes only a leading `./` (not arbitrary single-character prefixes).
+- Relative-path normalization preserves URL authorities and protocol-relative `//`, and clamps parent traversal at an absolute root.
 - URL path extraction treats only `.html`, `.htm`, `.xhtml` as file names; other dotted segments are kept as directories.
 - Shared URL helpers (scheme checks, basename, extension regex, `applyOutputUrlMode`) are centralized here and used by both Node and DOM.
 - `safeDecodeUri` avoids decoding `%2F/%5C` to keep path segmentation stable while still handling non-ASCII filenames.

@@ -819,6 +819,19 @@ await runTest(28, 'no-upscale caps resize scaling and rejects removed option', a
     () => mod.createContext('', { readMeta: true }, root),
     /noUpscale option was removed/
   )
+
+  metaTag.setAttribute('content', JSON.stringify({
+    _extensionSettings: {
+      disableRendererImage: true,
+      rendererImage: {
+        noUpscale: false,
+      },
+    },
+  }))
+  await assert.rejects(
+    () => mod.createContext('', { readMeta: true }, root),
+    /noUpscale option was removed/
+  )
 })
 
 // Test 29: imagescale clamps above 100%
@@ -1191,6 +1204,10 @@ await runTest(42, 'Default export no-op returns Promise', async () => {
   let catchCalled = false
   await ret.catch(() => { catchCalled = true })
   assert.strictEqual(catchCalled, false)
+  assert.throws(
+    () => mod.default(null, { noUpscale: false }),
+    /noUpscale option was removed/
+  )
 })
 
 // Test 43: runInPreview applies transforms and returns context/summary
@@ -1427,6 +1444,23 @@ await runTest(49, 'Single IMG root is processed', async () => {
   } finally {
     global.Image = originalImage
   }
+})
+
+// Test 49.5: direct transforms also support detached IMG nodes
+await runTest(49.5, 'Detached IMG root is processed directly', async () => {
+  const image = new MockElement('img', { src: 'cat.jpg', alt: 'cat' })
+  image.isConnected = false
+
+  const mod = await loadDomModule()
+  const summary = await mod.applyImageTransforms(image, {
+    enableSizeProbe: false,
+    lazyLoad: true,
+  })
+
+  assert.strictEqual(summary.total, 1)
+  assert.strictEqual(summary.processed, 1)
+  assert.strictEqual(summary.skipped, 1)
+  assert.strictEqual(image.getAttribute('loading'), 'lazy')
 })
 
 // Test 50: observeAttributeFilter can skip selected img attributes
@@ -2620,6 +2654,38 @@ await runTest(72, 'readMeta resolves ownerDocument for iterable roots', async ()
   } finally {
     global.document = originalDocument
   }
+})
+
+// Test 73: protocol-relative frontmatter image bases preserve both leading slashes
+await runTest(73, 'Protocol-relative image base is preserved', async () => {
+  const images = [
+    new MockElement('img', { src: 'cat.jpg', alt: 'cat' })
+  ]
+  const markdownWithYaml = `---
+images.dirUrl: //image.example.com/assets/
+---`
+
+  await testSetImageAttributes(images, { enableSizeProbe: false }, markdownWithYaml)
+
+  assert.strictEqual(images[0].getAttribute('src'), '//image.example.com/assets/cat.jpg')
+})
+
+// Test 74: non-HTTP URL schemes are not rewritten as local paths
+await runTest(74, 'External URL scheme is not rewritten', async () => {
+  const images = [
+    new MockElement('img', { src: 'ftp://files.example.com/cat.jpg', alt: 'cat' })
+  ]
+  const markdownWithYaml = `---
+url: https://example.com/page/
+---`
+
+  await testSetImageAttributes(images, { enableSizeProbe: false }, markdownWithYaml)
+
+  assert.strictEqual(images[0].getAttribute('src'), 'ftp://files.example.com/cat.jpg')
+
+  images[0].setAttribute('src', 'cid:cat.jpg')
+  await testSetImageAttributes(images, { enableSizeProbe: false }, markdownWithYaml)
+  assert.strictEqual(images[0].getAttribute('src'), 'cid:cat.jpg')
 })
 
 console.log('All tests passed')
