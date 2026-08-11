@@ -376,14 +376,9 @@ const getBasename = (value) => {
 }
 
 const getImageName = (value) => {
-  const decoded = safeDecodeUri(value)
-  const cleanSrc = stripQueryHash(decoded)
-  const lastDotIndex = cleanSrc.lastIndexOf('.')
-  const lastSlashIndex = Math.max(cleanSrc.lastIndexOf('/'), cleanSrc.lastIndexOf('\\'))
-  if (lastDotIndex > lastSlashIndex) {
-    return cleanSrc.substring(lastSlashIndex + 1, lastDotIndex)
-  }
-  return cleanSrc.substring(lastSlashIndex + 1)
+  const basename = getBasename(value)
+  const lastDotIndex = basename.lastIndexOf('.')
+  return lastDotIndex >= 0 ? basename.slice(0, lastDotIndex) : basename
 }
 
 const parseFrontmatter = (markdownCont) => {
@@ -461,8 +456,8 @@ const classifyResizeHint = (title) => {
   return { state: 'invalid', normalizedResizeValue: '' }
 }
 
-const parseResizeValue = (value) => {
-  const normalized = normalizeResizeValue(value)
+const parseNormalizedResizeValue = (value) => {
+  const normalized = toText(value)
   if (!normalized) return null
   const match = normalized.match(resizeValueReg)
   if (!match) return null
@@ -470,6 +465,7 @@ const parseResizeValue = (value) => {
   if (!Number.isFinite(numericValue)) return null
   return { value: numericValue, unit: match[2] }
 }
+const parseResizeValue = (value) => parseNormalizedResizeValue(normalizeResizeValue(value))
 
 const parseImageScale = (value) => {
   if (value === undefined || value === null) return null
@@ -557,7 +553,17 @@ const getScaleSuffixValue = (imgName) => {
   return info ? info.value : ''
 }
 
-const setImgSize = (imgName, imgData, scaleSuffix, resize, title, imageScale, conditionalResize = null, precomputedScaleSuffixInfo = undefined) => {
+const setImgSize = (
+  imgName,
+  imgData,
+  scaleSuffix,
+  resize,
+  title,
+  imageScale,
+  conditionalResize = null,
+  precomputedScaleSuffixInfo = undefined,
+  precomputedResizeValue = undefined
+) => {
   if (!imgData) return {}
   const originalWidth = imgData.width
   const originalHeight = imgData.height
@@ -578,7 +584,11 @@ const setImgSize = (imgName, imgData, scaleSuffix, resize, title, imageScale, co
       }
     }
   }
-  const resizeInfo = resize && title ? parseResizeValue(title) : null
+  const resizeInfo = resize && title
+    ? (precomputedResizeValue === undefined
+      ? parseResizeValue(title)
+      : parseNormalizedResizeValue(precomputedResizeValue))
+    : null
   if (resizeInfo) {
     if (resizeInfo.unit === '%') {
       h = Math.round(h * resizeInfo.value / 100)
@@ -655,18 +665,9 @@ const getFrontmatter = (frontmatter, option = {}) => {
     if (!lid.endsWith('/')) lid += '/'
     if (lid.startsWith('./')) lid = lid.slice(2)
   }
-  let url = toText(resolvedUrl.value)
-  if (url) {
-    if (!url.endsWith('/')) url += '/'
-  }
-  let urlimage = toText(resolvedUrlImage.value)
-  if (urlimage) {
-    if (!urlimage.endsWith('/')) urlimage += '/'
-  }
-  let urlimagebase = toText(resolvedUrlImageBase.value)
-  if (urlimagebase) {
-    if (!urlimagebase.endsWith('/')) urlimagebase += '/'
-  }
+  const url = ensureTrailingSlash(toText(resolvedUrl.value))
+  const urlimage = ensureTrailingSlash(toText(resolvedUrlImage.value))
+  const urlimagebase = ensureTrailingSlash(toText(resolvedUrlImageBase.value))
   let lmd = toText(resolvedLmd.value)
   if (lmd) lmd = lmd.replace(/\\/g, '/')
   if (lmd) {

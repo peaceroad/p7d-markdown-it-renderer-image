@@ -134,7 +134,7 @@ await runInPreview({
 - `resizeDataAttr` (default: `'data-img-resize'`): Store normalized effective resize metadata (`title` resize or `imagescale`). When enabled, `${resizeDataAttr}-origin` is also emitted for `imagescale`-derived values (`''` disables both).
 - `lazyLoad` (default: `false`): Add `loading="lazy"`.
 - `asyncDecode` (default: `false`): Add `decoding="async"`.
-- `checkImgExtensions` (default: `'png,jpg,jpeg,gif,webp'`): Extensions eligible for sizing (query/hash ignored).
+- `checkImgExtensions` (default: `'png,jpg,jpeg,gif,webp,svg'`): Extensions eligible for sizing (query/hash ignored). Node-side byte parsing supports PNG/APNG, JPEG, GIF, WebP, AVIF, HEIF/HEIC, and SVG; add other extensions explicitly only when the active sizing environment supports them.
 - `resolveSrc` (default: `true`): Resolve output `src` using frontmatter / `urlImageBase`.
 - `urlImageBase` (default: `''`): Fallback when frontmatter has no `urlimagebase`.
 - `outputUrlMode` (default: `'absolute'`): `absolute` | `protocol-relative` | `path-only`.
@@ -153,6 +153,10 @@ Notes:
 - `remoteTimeout` (default: `5000`): `sync-fetch` timeout (ms).
 - `remoteMaxBytes` (default: `16MB`): Skip remote image when `content-length` or the downloaded buffer exceeds this value.
 - `cacheMax` (default: `64`): Per-render size cache entries (`0` disables).
+
+Node sizing is synchronous. Dimension parsing starts with the first 64 KiB and falls back to at most 512 KiB for local files, matching the previous local read bound. Remote sizing still downloads the response synchronously before parsing, so use `disableRemoteSize: true` for untrusted input and extension-host/UI-thread workloads.
+
+SVG sizing reads only the root `<svg>` start tag. It uses positive absolute `width` / `height` values when both are available, derives a missing dimension from `viewBox`, or uses the positive `viewBox` width and height when explicit dimensions are relative or omitted. Unitless values and `px`, `in`, `cm`, `mm`, `Q`, `pt`, and `pc` are converted to CSS pixels. XML entities, scripts, styles, and external resources are not evaluated or resolved; SVG without a usable absolute size or `viewBox` is rendered without generated size attributes.
 
 ### DOM-only
 
@@ -182,6 +186,9 @@ Additional DOM behavior:
   - `suppressErrors` is auto-set to `local`
   - `enableSizeProbe` is auto-set to `false`
 - `loadSrcStrategy: 'final'` is accepted as a backward-compatible alias of `'output'`.
+- While the helper still owns an image's `src`, it retains the original markdown URL across `previewMode` changes. A later external `src` edit takes ownership and becomes the new raw source.
+- Author-provided `loading` / `decoding` attributes, including explicitly empty attributes, are not overwritten or removed when their corresponding options change.
+- An auto-hidden resize title remains effective across repeated transforms even when `resizeDataAttr: ''` disables resize metadata attributes.
 
 ## Frontmatter Resolution Workflow
 

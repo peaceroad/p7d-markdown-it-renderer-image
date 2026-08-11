@@ -1,6 +1,6 @@
 {
   "name": "@peaceroad/markdown-it-renderer-image",
-  "version": "0.16.1",
+  "version": "0.17.0",
   "description": "A markdown-it image plugin plus a browser DOM helper for src rewriting and image sizing.",
   "main": "index.js",
   "type": "module",
@@ -23,7 +23,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "test": "node test/test.js && node test/test-yaml-frontmatter.js",
+    "test": "node test/test.js && node test/test-yaml-frontmatter.js && node test/test-image-dimensions.js",
     "test:script": "node test/script/test-set-img-attributes.js"
   },
   "repository": {
@@ -37,7 +37,7 @@
   },
   "homepage": "https://github.com/peaceroad/p7d-markdown-it-renderer-image#readme",
   "dependencies": {
-    "image-size": "^1.2.1",
+    "image-dimensions": "^2.5.1",
     "sync-fetch": "^0.6.0"
   },
   "devDependencies": {

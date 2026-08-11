@@ -2,8 +2,9 @@ import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import fetch from 'sync-fetch'
-import imageSize from 'image-size'
+import { imageDimensionsFromData } from 'image-dimensions'
 import { defaultNodeOptions } from './script/default-options.js'
+import { getSvgDimensionsFromData } from './script/svg-dimensions.js'
 import {
   setImgSize,
   getFrontmatter,
@@ -34,6 +35,70 @@ const globalLogSetMaxEntries = 2048
 const yamlFrontmatterFence = '---\n'
 const defaultScaleSuffixDataAttr = 'data-img-scale-suffix'
 const rendererImageInstalledKey = Symbol.for('@peaceroad/markdown-it-renderer-image/installed')
+const initialImageHeaderBytes = 64 * 1024
+const localImageHeaderMaxBytes = 512 * 1024
+const svgExtensionReg = /\.svg$/i
+
+const parseImageDimensions = (data) => {
+  const dimensions = imageDimensionsFromData(data)
+  if (!dimensions) return null
+  if (
+    !Number.isSafeInteger(dimensions.width)
+    || !Number.isSafeInteger(dimensions.height)
+    || dimensions.width <= 0
+    || dimensions.height <= 0
+  ) {
+    throw new TypeError('Unsupported or invalid image data')
+  }
+  return dimensions
+}
+const getImageDimensionParser = (src) => (
+  svgExtensionReg.test(stripQueryHash(src))
+    ? getSvgDimensionsFromData
+    : parseImageDimensions
+)
+const getImageDimensions = (data, parseDimensions) => {
+  const initialData = data.byteLength > initialImageHeaderBytes
+    ? data.subarray(0, initialImageHeaderBytes)
+    : data
+  const dimensions = parseDimensions(initialData)
+    || (initialData === data ? null : parseDimensions(data))
+  if (!dimensions) throw new TypeError('Unsupported or invalid image data')
+  return dimensions
+}
+const readImageBytes = (file, bytes, offset, targetLength) => {
+  while (offset < targetLength) {
+    const bytesRead = fs.readSync(file, bytes, offset, targetLength - offset, offset)
+    if (bytesRead === 0) break
+    offset += bytesRead
+  }
+  return offset
+}
+const getLocalImageDimensions = (src) => {
+  const parseDimensions = getImageDimensionParser(src)
+  const file = fs.openSync(src, 'r')
+  try {
+    const fileSize = fs.fstatSync(file).size
+    const maxByteLength = Math.min(fileSize, localImageHeaderMaxBytes)
+    if (maxByteLength <= 0) throw new TypeError('Empty image data')
+
+    const initialLength = Math.min(maxByteLength, initialImageHeaderBytes)
+    let bytes = Buffer.allocUnsafe(initialLength)
+    let offset = readImageBytes(file, bytes, 0, initialLength)
+    let dimensions = parseDimensions(bytes.subarray(0, offset))
+    if (!dimensions && offset === initialLength && initialLength < maxByteLength) {
+      const expandedBytes = Buffer.allocUnsafe(maxByteLength)
+      bytes.copy(expandedBytes, 0, 0, offset)
+      bytes = expandedBytes
+      offset = readImageBytes(file, bytes, offset, maxByteLength)
+      dimensions = parseDimensions(bytes.subarray(0, offset))
+    }
+    if (!dimensions) throw new TypeError('Unsupported or invalid image data')
+    return dimensions
+  } finally {
+    fs.closeSync(file)
+  }
+}
 
 const getRemoteFetchTargets = (value) => {
   if (!isProtocolRelativeUrl(value)) return [value]
@@ -51,6 +116,7 @@ const getRemoteFailureMessage = (src, failure) => {
 }
 const getRemoteImgData = (src, timeout, remoteMaxBytes) => {
   const targets = getRemoteFetchTargets(src)
+  const parseDimensions = getImageDimensionParser(src)
   let lastFailure = null
   for (const target of targets) {
     try {
@@ -69,7 +135,7 @@ const getRemoteImgData = (src, timeout, remoteMaxBytes) => {
         if (remoteMaxBytes && buffer.length > remoteMaxBytes) {
           return { type: 'too-large', contentLength: buffer.length }
         }
-        return { type: 'success', data: imageSize(buffer) }
+        return { type: 'success', data: getImageDimensions(buffer, parseDimensions) }
       } catch {
         lastFailure = { type: 'decode' }
       }
@@ -180,8 +246,7 @@ const getImgData = (src, isRemote, timeout, cache, cacheMax, failedSet, suppress
   if (isRemote) {
     const remoteResult = getRemoteImgData(src, timeout, remoteMaxBytes)
     if (remoteResult.type === 'too-large') {
-      const suppressByType = suppressRemoteErrors
-      if (shouldLogLoadError(cacheKey, failedSet, suppressLoadErrors, suppressByType)) {
+      if (shouldLogLoadError(cacheKey, failedSet, suppressLoadErrors, suppressRemoteErrors)) {
         console.error(`[renderer-image] Skip image (too large: ${remoteResult.contentLength} bytes): ${src}`)
         markLoadErrorLogged(cacheKey, failedSet)
       }
@@ -189,8 +254,7 @@ const getImgData = (src, isRemote, timeout, cache, cacheMax, failedSet, suppress
       return emptyImgData
     }
     if (remoteResult.type !== 'success') {
-      const suppressByType = suppressRemoteErrors
-      if (shouldLogLoadError(cacheKey, failedSet, suppressLoadErrors, suppressByType)) {
+      if (shouldLogLoadError(cacheKey, failedSet, suppressLoadErrors, suppressRemoteErrors)) {
         console.error(getRemoteFailureMessage(src, remoteResult))
         markLoadErrorLogged(cacheKey, failedSet)
       }
@@ -202,12 +266,11 @@ const getImgData = (src, isRemote, timeout, cache, cacheMax, failedSet, suppress
     return data
   }
   try {
-    const data = imageSize(src)
+    const data = getLocalImageDimensions(src)
     setCache(cache, cacheKey, data, cacheMax)
     return data
   } catch {
-    const suppressByType = suppressLocalErrors
-    if (shouldLogLoadError(cacheKey, failedSet, suppressLoadErrors, suppressByType)) {
+    if (shouldLogLoadError(cacheKey, failedSet, suppressLoadErrors, suppressLocalErrors)) {
       console.error("[renderer-image] Can't load image: " + src)
       markLoadErrorLogged(cacheKey, failedSet)
     }
@@ -319,6 +382,7 @@ const mditRendererImage = (md, option) => {
 
     const resolvedSrc = src + srcSuffix
     const finalSrc = applyOutputUrlMode(safeDecodeUri(resolvedSrc), outputUrlMode)
+    const titleResizeValue = resizeEnabled ? normalizeResizeValue(titleRaw) : ''
 
     const isValidExt = imgExtReg.test(srcBase)
     let imgName = ''
@@ -333,7 +397,6 @@ const mditRendererImage = (md, option) => {
 
     if (isValidExt) {
       const warningKey = srcBase || srcRaw
-      if (!imgName) imgName = getImageName(srcBase)
       let srcPath = ''
       if (isRemote) {
         if (remoteSizeEnabled) {
@@ -370,7 +433,17 @@ const mditRendererImage = (md, option) => {
       }
 
       if (imgData?.width !== undefined) {
-        const { width, height } = setImgSize(imgName, imgData, scaleSuffixEnabled, resizeEnabled, titleRaw, imageScale, conditionalResize, scaleSuffixInfo)
+        const { width, height } = setImgSize(
+          imgName,
+          imgData,
+          scaleSuffixEnabled,
+          resizeEnabled,
+          titleRaw,
+          imageScale,
+          conditionalResize,
+          scaleSuffixInfo,
+          titleResizeValue
+        )
         token.attrSet('width', width)
         token.attrSet('height', height)
       }
@@ -379,7 +452,6 @@ const mditRendererImage = (md, option) => {
     token.attrSet('src', finalSrc)
     token.attrSet('alt', token.content || '')
 
-    const titleResizeValue = resizeEnabled ? normalizeResizeValue(titleRaw) : ''
     const effectiveResizeValue = titleResizeValue || imageScaleResizeValue || ''
     const effectiveResizeOrigin = !titleResizeValue && imageScaleResizeValue ? 'imagescale' : ''
     const removeTitle = autoHideResizeTitle && !!titleResizeValue

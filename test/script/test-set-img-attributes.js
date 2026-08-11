@@ -242,6 +242,20 @@ await runTest(2, 'Invalid extension early return', async () => {
   assert.strictEqual(img.getAttribute('decoding'), 'async')
 })
 
+// Test 2.5: SVG participates in default browser sizing
+await runTest(2.5, 'SVG is included in default sizing extensions', async () => {
+  const images = [
+    new MockElement('img', { src: 'diagram.svg', alt: 'diagram' })
+  ]
+  images[0].naturalWidth = 640
+  images[0].naturalHeight = 360
+
+  await testSetImageAttributes(images)
+
+  assert.strictEqual(images[0].getAttribute('width'), '640')
+  assert.strictEqual(images[0].getAttribute('height'), '360')
+})
+
 // Test 3: Multiple image processing
 await runTest(3, 'Multiple image processing', async () => {
   const images = [
@@ -1093,6 +1107,58 @@ urlimage: https://cdn.example.com/assets/
     global.document = originalDocument
     if (originalLocation === undefined) delete global.location
     else global.location = originalLocation
+  }
+})
+
+// Test 36.6: helper-owned src state survives preview mode switches in both directions
+await runTest(36.6, 'previewMode switches preserve the markdown src', async () => {
+  const images = [
+    new MockElement('img', { src: 'cats/cat.jpg', alt: 'cat' })
+  ]
+  const markdownWithYaml = `---
+lmd: https://preview.example/assets/
+url: https://example.com/page
+urlimage: https://cdn.example.com/assets/
+---`
+  const originalDocument = global.document
+  global.document = createMockDocument(images)
+
+  try {
+    const mod = await loadDomModule()
+    const outputContext = await mod.createContext(markdownWithYaml, {
+      previewMode: 'output',
+      enableSizeProbe: false,
+    }, global.document)
+    const localContext = await mod.createContext(markdownWithYaml, {
+      previewMode: 'local',
+      enableSizeProbe: false,
+    }, global.document)
+    const noWriteContext = await mod.createContext(markdownWithYaml, {
+      previewMode: 'markdown',
+      setDomSrc: false,
+      enableSizeProbe: false,
+    }, global.document)
+
+    await mod.applyImageTransforms(global.document, outputContext)
+    assert.strictEqual(images[0].getAttribute('src'), 'https://cdn.example.com/assets/cats/cat.jpg')
+    assert.strictEqual(images[0].getAttribute('data-img-src-raw'), '')
+
+    await mod.applyImageTransforms(global.document, localContext)
+    assert.strictEqual(images[0].getAttribute('src'), 'https://preview.example/assets/cats/cat.jpg')
+    assert.strictEqual(images[0].getAttribute('data-img-src-raw'), 'cats/cat.jpg')
+    assert.strictEqual(images[0].getAttribute('data-img-output-src'), 'https://cdn.example.com/assets/cats/cat.jpg')
+
+    await mod.applyImageTransforms(global.document, noWriteContext)
+    assert.strictEqual(images[0].getAttribute('src'), 'https://preview.example/assets/cats/cat.jpg')
+    assert.strictEqual(images[0].getAttribute('data-img-src-raw'), 'cats/cat.jpg')
+    assert.strictEqual(images[0].getAttribute('data-img-output-src'), 'https://cdn.example.com/assets/cats/cat.jpg')
+
+    await mod.applyImageTransforms(global.document, outputContext)
+    assert.strictEqual(images[0].getAttribute('src'), 'https://cdn.example.com/assets/cats/cat.jpg')
+    assert.strictEqual(images[0].getAttribute('data-img-src-raw'), '')
+    assert.strictEqual(images[0].getAttribute('data-img-output-src'), '')
+  } finally {
+    global.document = originalDocument
   }
 })
 
@@ -2302,6 +2368,85 @@ await runTest(62, 'startObserver(context) preserves readMeta on re-create', asyn
   }
 })
 
+// Test 62.5: a skipped prebuilt context must retain only its original option seed
+await runTest(62.5, 'startObserver(skip context) preserves meta option updates', async () => {
+  const images = [
+    new MockElement('img', { src: 'cat.jpg', alt: 'cat' })
+  ]
+  const metaTag = new MockElement('meta', {
+    name: 'markdown-frontmatter',
+    content: JSON.stringify({
+      _extensionSettings: {
+        disableRendererImage: true,
+      },
+    }),
+  })
+  const root = createMockDocument(images, metaTag)
+  const originalMutationObserver = global.MutationObserver
+  const originalRequestAnimationFrame = global.requestAnimationFrame
+  let processedCount = 0
+  let lastObserver = null
+
+  global.requestAnimationFrame = (fn) => setTimeout(fn, 0)
+  global.MutationObserver = class MockMutationObserver {
+    constructor(callback) {
+      this.callback = callback
+      this.options = null
+      lastObserver = this
+    }
+    observe(_target, options) {
+      this.options = options
+    }
+    disconnect() {}
+  }
+
+  try {
+    const mod = await loadDomModule()
+    const context = await mod.createContext('', {
+      readMeta: true,
+      enableSizeProbe: false,
+      onImageProcessed: () => { processedCount += 1 },
+    }, root)
+    assert.strictEqual(context.skip, true)
+    assert.ok(context.seedOption)
+
+    const controller = await mod.startObserver(root, context)
+    metaTag.setAttribute('content', JSON.stringify({
+      _extensionSettings: {
+        rendererImage: {
+          lazyLoad: true,
+          observeAttributeFilter: ['title'],
+        },
+      },
+    }))
+    lastObserver.callback([{
+      type: 'attributes',
+      target: metaTag,
+      attributeName: 'content',
+    }])
+    await sleep(40)
+
+    assert.strictEqual(images[0].getAttribute('loading'), 'lazy')
+    assert.strictEqual(processedCount, 1)
+    assert.ok(lastObserver.options.attributeFilter.includes('title'))
+    assert.ok(lastObserver.options.attributeFilter.includes('content'))
+    assert.ok(!lastObserver.options.attributeFilter.includes('src'))
+
+    controller.disconnect()
+  } finally {
+    if (originalRequestAnimationFrame === undefined) {
+      delete global.requestAnimationFrame
+    } else {
+      global.requestAnimationFrame = originalRequestAnimationFrame
+    }
+    if (originalMutationObserver === undefined) {
+      delete global.MutationObserver
+    } else {
+      global.MutationObserver = originalMutationObserver
+    }
+  }
+})
+
 // Test 63: resolveSrc false keeps probe source on markdown src even with lmd
 await runTest(63, 'resolveSrc false ignores lmd for probe source', async () => {
   const images = [
@@ -2590,6 +2735,40 @@ await runTest(70, 'author loading/decoding are preserved on disable', async () =
   }
 })
 
+// Test 70.5: empty author attributes remain author-owned
+await runTest(70.5, 'empty author loading/decoding attributes are preserved', async () => {
+  const images = [
+    new MockElement('img', { src: 'cat.jpg', alt: 'cat', loading: '', decoding: '' })
+  ]
+  const originalDocument = global.document
+  global.document = createMockDocument(images)
+
+  try {
+    const mod = await loadDomModule()
+    await mod.applyImageTransforms(global.document, {
+      enableSizeProbe: false,
+      lazyLoad: true,
+      asyncDecode: true,
+    })
+    assert.strictEqual(images[0].attributes.has('loading'), true)
+    assert.strictEqual(images[0].attributes.has('decoding'), true)
+    assert.strictEqual(images[0].getAttribute('loading'), '')
+    assert.strictEqual(images[0].getAttribute('decoding'), '')
+
+    await mod.applyImageTransforms(global.document, {
+      enableSizeProbe: false,
+      lazyLoad: false,
+      asyncDecode: false,
+    })
+    assert.strictEqual(images[0].attributes.has('loading'), true)
+    assert.strictEqual(images[0].attributes.has('decoding'), true)
+    assert.strictEqual(images[0].getAttribute('loading'), '')
+    assert.strictEqual(images[0].getAttribute('decoding'), '')
+  } finally {
+    global.document = originalDocument
+  }
+})
+
 // Test 71: hidden resize titles are restored when auto-hide is disabled
 await runTest(71, 'auto-hidden resize title is restored when autoHideResizeTitle turns off', async () => {
   const images = [
@@ -2622,6 +2801,32 @@ await runTest(71, 'auto-hidden resize title is restored when autoHideResizeTitle
   }
 })
 
+// Test 71.5: hidden title state keeps resizing when metadata attributes are disabled
+await runTest(71.5, 'auto-hidden resize remains active without resizeDataAttr', async () => {
+  const images = [
+    new MockElement('img', { src: 'cat.jpg', alt: 'cat', title: 'resize:50%' })
+  ]
+  images[0].naturalWidth = 800
+  images[0].naturalHeight = 600
+  const options = {
+    resize: true,
+    autoHideResizeTitle: true,
+    resizeDataAttr: '',
+  }
+
+  await testSetImageAttributes(images, options)
+  assert.strictEqual(images[0].getAttribute('title'), '')
+  assert.strictEqual(images[0].getAttribute('data-img-resize'), '')
+  assert.strictEqual(images[0].getAttribute('width'), '400')
+  assert.strictEqual(images[0].getAttribute('height'), '300')
+
+  await testSetImageAttributes(images, options)
+  assert.strictEqual(images[0].getAttribute('title'), '')
+  assert.strictEqual(images[0].getAttribute('data-img-resize'), '')
+  assert.strictEqual(images[0].getAttribute('width'), '400')
+  assert.strictEqual(images[0].getAttribute('height'), '300')
+})
+
 // Test 72: readMeta resolves ownerDocument for iterable roots
 await runTest(72, 'readMeta resolves ownerDocument for iterable roots', async () => {
   const images = [
@@ -2637,7 +2842,7 @@ await runTest(72, 'readMeta resolves ownerDocument for iterable roots', async ()
       }
     })
   })
-  const ownerDocument = createMockDocument(images, metaTag)
+  createMockDocument(images, metaTag)
   const originalDocument = global.document
   global.document = createMockDocument([])
 
@@ -2686,6 +2891,39 @@ url: https://example.com/page/
   images[0].setAttribute('src', 'cid:cat.jpg')
   await testSetImageAttributes(images, { enableSizeProbe: false }, markdownWithYaml)
   assert.strictEqual(images[0].getAttribute('src'), 'cid:cat.jpg')
+})
+
+// Test 75: string-valued DOM options flow through rendererImage meta settings
+await runTest(75, 'Meta settings apply custom extension and output attribute options', async () => {
+  const images = [
+    new MockElement('img', { src: 'cat.jpg', alt: 'cat' })
+  ]
+  const metaContent = JSON.stringify({
+    urlimage: 'https://cdn.example.com/assets/',
+    _extensionSettings: {
+      rendererImage: {
+        previewMode: 'markdown',
+        previewOutputSrcAttr: 'data-preview-final-src',
+        checkImgExtensions: 'png',
+      },
+    },
+  })
+
+  const { summary } = await testSetImageAttributes(
+    images,
+    { readMeta: true },
+    null,
+    metaContent,
+    null,
+    true
+  )
+
+  assert.strictEqual(images[0].getAttribute('src'), 'cat.jpg')
+  assert.strictEqual(images[0].getAttribute('data-preview-final-src'), 'https://cdn.example.com/assets/cat.jpg')
+  assert.strictEqual(images[0].getAttribute('data-img-output-src'), '')
+  assert.strictEqual(images[0].getAttribute('width'), '')
+  assert.strictEqual(images[0].getAttribute('height'), '')
+  assert.strictEqual(summary.skipped, 1)
 })
 
 console.log('All tests passed')

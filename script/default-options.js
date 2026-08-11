@@ -4,7 +4,7 @@ const defaultSharedOptions = Object.freeze({
   conditionalResize: null, // conditional auto-resize policy after explicit resize/imageScale
   lazyLoad: false, // add loading="lazy"
   asyncDecode: false, // add decoding="async"
-  checkImgExtensions: 'png,jpg,jpeg,gif,webp', // size only these extensions
+  checkImgExtensions: 'png,jpg,jpeg,gif,webp,svg', // size only these extensions
   resolveSrc: true, // resolve final src using frontmatter
   urlImageBase: '', // fallback base when frontmatter lacks urlimagebase
   outputUrlMode: 'absolute', // absolute | protocol-relative | path-only

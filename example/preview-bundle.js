@@ -9,7 +9,7 @@ const defaultSharedOptions = Object.freeze({
   conditionalResize: null, // conditional auto-resize policy after explicit resize/imageScale
   lazyLoad: false, // add loading="lazy"
   asyncDecode: false, // add decoding="async"
-  checkImgExtensions: 'png,jpg,jpeg,gif,webp', // size only these extensions
+  checkImgExtensions: 'png,jpg,jpeg,gif,webp,svg', // size only these extensions
   resolveSrc: true, // resolve final src using frontmatter
   urlImageBase: '', // fallback base when frontmatter lacks urlimagebase
   outputUrlMode: 'absolute', // absolute | protocol-relative | path-only
@@ -429,14 +429,9 @@ const getBasename = (value) => {
 }
 
 const getImageName = (value) => {
-  const decoded = safeDecodeUri(value)
-  const cleanSrc = stripQueryHash(decoded)
-  const lastDotIndex = cleanSrc.lastIndexOf('.')
-  const lastSlashIndex = Math.max(cleanSrc.lastIndexOf('/'), cleanSrc.lastIndexOf('\\'))
-  if (lastDotIndex > lastSlashIndex) {
-    return cleanSrc.substring(lastSlashIndex + 1, lastDotIndex)
-  }
-  return cleanSrc.substring(lastSlashIndex + 1)
+  const basename = getBasename(value)
+  const lastDotIndex = basename.lastIndexOf('.')
+  return lastDotIndex >= 0 ? basename.slice(0, lastDotIndex) : basename
 }
 
 const parseFrontmatter = (markdownCont) => {
@@ -514,8 +509,8 @@ const classifyResizeHint = (title) => {
   return { state: 'invalid', normalizedResizeValue: '' }
 }
 
-const parseResizeValue = (value) => {
-  const normalized = normalizeResizeValue(value)
+const parseNormalizedResizeValue = (value) => {
+  const normalized = toText(value)
   if (!normalized) return null
   const match = normalized.match(resizeValueReg)
   if (!match) return null
@@ -523,6 +518,7 @@ const parseResizeValue = (value) => {
   if (!Number.isFinite(numericValue)) return null
   return { value: numericValue, unit: match[2] }
 }
+const parseResizeValue = (value) => parseNormalizedResizeValue(normalizeResizeValue(value))
 
 const parseImageScale = (value) => {
   if (value === undefined || value === null) return null
@@ -610,7 +606,17 @@ const getScaleSuffixValue = (imgName) => {
   return info ? info.value : ''
 }
 
-const setImgSize = (imgName, imgData, scaleSuffix, resize, title, imageScale, conditionalResize = null, precomputedScaleSuffixInfo = undefined) => {
+const setImgSize = (
+  imgName,
+  imgData,
+  scaleSuffix,
+  resize,
+  title,
+  imageScale,
+  conditionalResize = null,
+  precomputedScaleSuffixInfo = undefined,
+  precomputedResizeValue = undefined
+) => {
   if (!imgData) return {}
   const originalWidth = imgData.width
   const originalHeight = imgData.height
@@ -631,7 +637,11 @@ const setImgSize = (imgName, imgData, scaleSuffix, resize, title, imageScale, co
       }
     }
   }
-  const resizeInfo = resize && title ? parseResizeValue(title) : null
+  const resizeInfo = resize && title
+    ? (precomputedResizeValue === undefined
+      ? parseResizeValue(title)
+      : parseNormalizedResizeValue(precomputedResizeValue))
+    : null
   if (resizeInfo) {
     if (resizeInfo.unit === '%') {
       h = Math.round(h * resizeInfo.value / 100)
@@ -708,18 +718,9 @@ const getFrontmatter = (frontmatter, option = {}) => {
     if (!lid.endsWith('/')) lid += '/'
     if (lid.startsWith('./')) lid = lid.slice(2)
   }
-  let url = toText(resolvedUrl.value)
-  if (url) {
-    if (!url.endsWith('/')) url += '/'
-  }
-  let urlimage = toText(resolvedUrlImage.value)
-  if (urlimage) {
-    if (!urlimage.endsWith('/')) urlimage += '/'
-  }
-  let urlimagebase = toText(resolvedUrlImageBase.value)
-  if (urlimagebase) {
-    if (!urlimagebase.endsWith('/')) urlimagebase += '/'
-  }
+  const url = ensureTrailingSlash(toText(resolvedUrl.value))
+  const urlimage = ensureTrailingSlash(toText(resolvedUrlImage.value))
+  const urlimagebase = ensureTrailingSlash(toText(resolvedUrlImageBase.value))
   let lmd = toText(resolvedLmd.value)
   if (lmd) lmd = lmd.replace(/\\/g, '/')
   if (lmd) {
@@ -794,7 +795,7 @@ const removeAttrIfPresent = (element, name) => {
 const syncManagedAttr = (img, managedState, attrName, enabled, expectedValue, stateKey) => {
   const currentValue = getAttr(img, attrName)
   if (enabled) {
-    if (!currentValue) {
+    if (!hasAttr(img, attrName)) {
       setAttrIfChanged(img, attrName, expectedValue)
       managedState[stateKey] = true
       return
@@ -831,6 +832,7 @@ const probeCacheByOwner = new WeakMap()
 const resizeHintStateByImage = new WeakMap()
 const managedSupplementalAttrsByImage = new WeakMap()
 const autoHiddenResizeTitleByImage = new WeakMap()
+const managedOriginalSrcByImage = new WeakMap()
 const managedDisplaySrcByImage = new WeakMap()
 const createSummary = (total = 0) => ({
   total,
@@ -1018,25 +1020,26 @@ const getProbeCacheState = (context, root, images = null) => {
   if (!context.probeCacheState) context.probeCacheState = createProbeCacheState()
   return context.probeCacheState
 }
+const readCachedProbeResult = (state, key, ttlConfig, now) => {
+  if (!key) return null
+  const cached = state.entries.get(key)
+  if (!cached) return null
+  const ttlMs = cached.kind === 'success'
+    ? ttlConfig.successTtlMs
+    : ttlConfig.negativeTtlMs
+  const createdAt = cached.createdAt
+  if (!Number.isFinite(createdAt) || !Number.isFinite(ttlMs) || ttlMs <= 0 || (createdAt + ttlMs) <= now) {
+    state.entries.delete(key)
+    return null
+  }
+  state.entries.delete(key)
+  state.entries.set(key, cached)
+  return cached.result
+}
 const getCachedProbeResult = (state, keys, ttlConfig, now) => {
   if (!state || !keys || !ttlConfig) return null
-  const readEntry = (key) => {
-    if (!key) return null
-    const cached = state.entries.get(key)
-    if (!cached) return null
-    const ttlMs = cached.kind === 'success'
-      ? ttlConfig.successTtlMs
-      : ttlConfig.negativeTtlMs
-    const createdAt = cached.createdAt
-    if (!Number.isFinite(createdAt) || !Number.isFinite(ttlMs) || ttlMs <= 0 || (createdAt + ttlMs) <= now) {
-      state.entries.delete(key)
-      return null
-    }
-    state.entries.delete(key)
-    state.entries.set(key, cached)
-    return cached.result
-  }
-  return readEntry(keys.successKey) || readEntry(keys.negativeKey)
+  return readCachedProbeResult(state, keys.successKey, ttlConfig, now)
+    || readCachedProbeResult(state, keys.negativeKey, ttlConfig, now)
 }
 const setCachedProbeResult = (state, key, result, maxEntries, now) => {
   if (!state || !key || maxEntries <= 0) return
@@ -1052,21 +1055,6 @@ const setCachedProbeResult = (state, key, result, maxEntries, now) => {
     state.entries.delete(oldestKey)
   }
 }
-const sharedContextUtils = Object.freeze({
-  setImgSize,
-  normalizeRelativePath,
-  classifyResizeHint,
-  resizeValueReg,
-  isHttpUrl,
-  isProtocolRelativeUrl,
-  isFileUrl,
-  hasUrlScheme,
-  hasUriScheme,
-  hasSpecialScheme,
-  stripQueryHash,
-  getImageName,
-  applyOutputUrlMode,
-})
 const rendererBooleanOptionKeys = Object.freeze([
   'scaleSuffix',
   'resize',
@@ -1191,7 +1179,7 @@ const createContext = async (markdownCont = '', option = {}, root = null) => {
       failRemovedNoUpscaleOption()
     }
     if (extensionSettings.notSetImageElementAttributes || extensionSettings.disableRendererImage) {
-      return { skip: true, opt: currentOpt }
+      return { skip: true, opt: currentOpt, seedOption }
     }
     if (extensionSettings.rendererImage) {
       applyRendererOptions(currentOpt, extensionSettings.rendererImage, optionOverrides)
@@ -1278,7 +1266,6 @@ const createContext = async (markdownCont = '', option = {}, root = null) => {
   return {
     opt: currentOpt,
     seedOption,
-    observedImgAttributes: new Set(currentOpt.observeAttributeFilter),
     probeCacheOwner: null,
     imageBase,
     lidPattern,
@@ -1287,7 +1274,6 @@ const createContext = async (markdownCont = '', option = {}, root = null) => {
     resizeDataAttr,
     resizeOriginDataAttr,
     conditionalResize,
-    scaleSuffixDataAttr: defaultScaleSuffixDataAttr,
     outputSrcAttr,
     loadSrcResolver,
     loadSrcMap,
@@ -1295,7 +1281,6 @@ const createContext = async (markdownCont = '', option = {}, root = null) => {
     imageScale,
     imageScaleResizeValue,
     onImageProcessed,
-    utils: sharedContextUtils,
   }
 }
 
@@ -1315,7 +1300,6 @@ const applyImageTransforms = async (root, contextOrOptions = {}, markdownCont = 
     resizeDataAttr,
     resizeOriginDataAttr,
     conditionalResize,
-    scaleSuffixDataAttr,
     outputSrcAttr,
     loadSrcResolver,
     loadSrcMap,
@@ -1323,21 +1307,7 @@ const applyImageTransforms = async (root, contextOrOptions = {}, markdownCont = 
     imageScale,
     imageScaleResizeValue,
     onImageProcessed,
-    utils,
   } = context
-  const {
-    setImgSize,
-    normalizeRelativePath,
-    classifyResizeHint,
-    resizeValueReg,
-    isHttpUrl,
-    isProtocolRelativeUrl,
-    isFileUrl,
-    hasUriScheme,
-    stripQueryHash,
-    getImageName,
-    applyOutputUrlMode,
-  } = utils
 
   const images = collectImages(root)
   const summary = createSummary(images.length)
@@ -1350,7 +1320,6 @@ const applyImageTransforms = async (root, contextOrOptions = {}, markdownCont = 
   const resolveSrcEnabled = currentOpt.resolveSrc
   const outputUrlMode = currentOpt.outputUrlMode
   const previewMode = currentOpt.previewMode
-  const usesStoredOriginalSrc = previewMode !== 'output' && currentOpt.setDomSrc
   const loadSrcStrategy = currentOpt.loadSrcStrategy
   const hasLoadSrcPrefixMap = loadSrcPrefixEntries.length > 0
   const setDomSrc = currentOpt.setDomSrc
@@ -1412,7 +1381,7 @@ const applyImageTransforms = async (root, contextOrOptions = {}, markdownCont = 
       height: readPositiveIntAttr(img, 'height'),
     })
   }
-  const applyProbeResultToImage = (img, imgName, scaleSuffixInfo, resizeTitleForSize, loadSrc, finalSrc, displaySrc, probeResult) => {
+  const applyProbeResultToImage = (img, imgName, scaleSuffixInfo, resizeValue, loadSrc, finalSrc, displaySrc, probeResult) => {
     let status = probeResult?.status || 'failed'
     let width = 0
     let height = 0
@@ -1428,10 +1397,11 @@ const applyImageTransforms = async (root, contextOrOptions = {}, markdownCont = 
           { width: naturalWidth, height: naturalHeight },
           scaleSuffixEnabled,
           resizeEnabled,
-          resizeTitleForSize,
+          resizeValue,
           imageScale,
           conditionalResize,
-          scaleSuffixInfo
+          scaleSuffixInfo,
+          resizeValue
         )
         width = sized.width
         height = sized.height
@@ -1532,8 +1502,7 @@ const applyImageTransforms = async (root, contextOrOptions = {}, markdownCont = 
     inFlightProbeState.set(cacheKeys.inFlightKey, promise)
     return promise
   }
-  const probeImage = (img, loadSrc, sizeSrc, scaleSuffixInfo, resizeTitleForSize, finalSrc, displaySrc) => {
-    const imgName = getImageName(sizeSrc)
+  const probeImage = (img, loadSrc, imgName, scaleSuffixInfo, resizeValue, finalSrc, displaySrc) => {
     const isRemoteForError = isProtocolRelativeUrl(loadSrc)
       || (hasUriScheme(loadSrc) && !isFileUrl(loadSrc))
     const suppressLoadErrors = suppressAllErrors
@@ -1544,7 +1513,7 @@ const applyImageTransforms = async (root, contextOrOptions = {}, markdownCont = 
         img,
         imgName,
         scaleSuffixInfo,
-        resizeTitleForSize,
+        resizeValue,
         loadSrc,
         finalSrc,
         displaySrc,
@@ -1563,9 +1532,16 @@ const applyImageTransforms = async (root, contextOrOptions = {}, markdownCont = 
     summary.processed += 1
 
     const currentSrcAttr = getAttr(img, 'src')
-    const storedOriginalSrc = usesStoredOriginalSrc ? getAttr(img, originalSrcAttr) : ''
-    const managedDisplaySrc = usesStoredOriginalSrc ? (managedDisplaySrcByImage.get(img) || '') : ''
-    const useStored = usesStoredOriginalSrc && storedOriginalSrc && managedDisplaySrc === currentSrcAttr
+    const hasManagedOriginalSrc = managedOriginalSrcByImage.has(img)
+    const hasStoredOriginalSrc = hasAttr(img, originalSrcAttr)
+    const hasManagedDisplaySrc = managedDisplaySrcByImage.has(img)
+    const storedOriginalSrc = hasManagedOriginalSrc
+      ? managedOriginalSrcByImage.get(img)
+      : (hasStoredOriginalSrc ? getAttr(img, originalSrcAttr) : '')
+    const managedDisplaySrc = hasManagedDisplaySrc ? managedDisplaySrcByImage.get(img) : ''
+    const useStored = hasManagedDisplaySrc
+      && (hasManagedOriginalSrc || hasStoredOriginalSrc)
+      && managedDisplaySrc === currentSrcAttr
     const srcRaw = useStored ? storedOriginalSrc : currentSrcAttr
     const srcBase = stripQueryHash(srcRaw)
     const srcSuffix = srcRaw.slice(srcBase.length)
@@ -1602,10 +1578,10 @@ const applyImageTransforms = async (root, contextOrOptions = {}, markdownCont = 
 
     let displaySrc = finalSrc
     if (previewMode === 'markdown' && isLocalSrc) {
-      displaySrc = storedOriginalSrc || srcRaw
+      displaySrc = srcRaw
     }
     if (previewMode === 'local' && isLocalSrc) {
-      displaySrc = localDisplaySrc || storedOriginalSrc || srcRaw
+      displaySrc = localDisplaySrc || srcRaw
     }
 
     if (loadSrcStrategy === 'raw') {
@@ -1645,15 +1621,12 @@ const applyImageTransforms = async (root, contextOrOptions = {}, markdownCont = 
     } else {
       removeAttrIfPresent(img, originalSrcAttr)
       if (outputSrcAttr) removeAttrIfPresent(img, outputSrcAttr)
-      managedDisplaySrcByImage.delete(img)
     }
 
     if (setDomSrc) {
       setAttrIfChanged(img, 'src', displaySrc)
-      if (previewMode !== 'output') managedDisplaySrcByImage.set(img, displaySrc)
-      else managedDisplaySrcByImage.delete(img)
-    } else {
-      managedDisplaySrcByImage.delete(img)
+      managedOriginalSrcByImage.set(img, srcRaw)
+      managedDisplaySrcByImage.set(img, displaySrc)
     }
 
     const previousResizeHintStateInfo = tracksResizeHintState
@@ -1664,9 +1637,10 @@ const applyImageTransforms = async (root, contextOrOptions = {}, markdownCont = 
     }
 
     let titleAttr = getAttr(img, 'title')
-    const autoHiddenResizeTitle = autoHiddenResizeTitleByImage.get(img) || null
+    let autoHiddenResizeTitle = autoHiddenResizeTitleByImage.get(img) || null
     if (autoHiddenResizeTitle && titleAttr && titleAttr !== autoHiddenResizeTitle.title) {
       autoHiddenResizeTitleByImage.delete(img)
+      autoHiddenResizeTitle = null
     }
     const storedTitle = resizeDataAttr ? getAttr(img, resizeDataAttr) : ''
     const storedResizeOrigin = resizeOriginDataAttr ? getAttr(img, resizeOriginDataAttr) : ''
@@ -1680,6 +1654,7 @@ const applyImageTransforms = async (root, contextOrOptions = {}, markdownCont = 
       const matchesStoredResize = !storedResizeValue || storedResizeValue === autoHiddenResizeTitle.resizeValue
       if (!matchesStoredResize) {
         autoHiddenResizeTitleByImage.delete(img)
+        autoHiddenResizeTitle = null
       } else if (restoreAllowed) {
         titleAttr = autoHiddenResizeTitle.title
         setAttrIfChanged(img, 'title', titleAttr)
@@ -1712,13 +1687,13 @@ const applyImageTransforms = async (root, contextOrOptions = {}, markdownCont = 
         })
       }
     }
-    const resizeValue = titleResizeValue || (!titleAttr ? storedResizeValue : '')
-    const resizeTitleForSize = titleResizeValue
-      ? titleAttr
-      : (!titleAttr && storedResizeValue ? `resize:${storedResizeValue}` : '')
+    const rememberedResizeValue = !titleAttr && autoHiddenResizeTitle
+      ? autoHiddenResizeTitle.resizeValue
+      : ''
+    const resizeValue = titleResizeValue || (!titleAttr ? (storedResizeValue || rememberedResizeValue) : '')
     const effectiveResizeValue = titleResizeValue
       || imageScaleResizeValue
-      || (!titleAttr ? storedResizeValue : '')
+      || (!titleAttr ? (storedResizeValue || rememberedResizeValue) : '')
     const effectiveResizeOrigin = !titleResizeValue && imageScaleResizeValue
       ? 'imagescale'
       : (!titleAttr && storedResizeValue && storedResizeOrigin === 'imagescale'
@@ -1769,12 +1744,11 @@ const applyImageTransforms = async (root, contextOrOptions = {}, markdownCont = 
     }
 
     const sizeSrc = finalSrc || srcRaw || loadSrc
-    const scaleSuffixInfo = scaleSuffixEnabled ? getScaleSuffixInfo(getImageName(sizeSrc)) : null
+    const imgName = scaleSuffixEnabled ? getImageName(sizeSrc) : ''
+    const scaleSuffixInfo = scaleSuffixEnabled ? getScaleSuffixInfo(imgName) : null
     const scaleSuffixValue = scaleSuffixInfo?.value || ''
-    if (scaleSuffixDataAttr) {
-      if (scaleSuffixValue) setAttrIfChanged(img, scaleSuffixDataAttr, scaleSuffixValue)
-      else removeAttrIfPresent(img, scaleSuffixDataAttr)
-    }
+    if (scaleSuffixValue) setAttrIfChanged(img, defaultScaleSuffixDataAttr, scaleSuffixValue)
+    else removeAttrIfPresent(img, defaultScaleSuffixDataAttr)
     let shouldKeepPendingDimensions = false
     if (
       keepPreviousDimensionsDuringResizeEdit
@@ -1802,7 +1776,7 @@ const applyImageTransforms = async (root, contextOrOptions = {}, markdownCont = 
       continue
     }
 
-    const promise = probeImage(img, loadSrc, sizeSrc, scaleSuffixInfo, resizeTitleForSize, finalSrc, displaySrc).then((status) => {
+    const promise = probeImage(img, loadSrc, imgName, scaleSuffixInfo, resizeValue, finalSrc, displaySrc).then((status) => {
       if (status === 'sized') summary.sized += 1
       else if (status === 'timeout') summary.timeout += 1
       else if (status === 'failed') summary.failed += 1
@@ -1860,15 +1834,12 @@ const startObserver = async (root, contextOrOptions = {}, markdownCont = '') => 
   }
   let observer = null
   let observerAttributeFilter = []
-  let observedImgAttributes = context?.observedImgAttributes instanceof Set
-    ? context.observedImgAttributes
-    : new Set(normalizeObserveAttributeFilter(context?.opt?.observeAttributeFilter))
+  let observedImgAttributes = new Set(normalizeObserveAttributeFilter(context?.opt?.observeAttributeFilter))
   let observeDebounceMs = normalizeNonNegativeNumber(context?.opt?.observeDebounceMs, 0)
   const hasSameObserverFilter = (current, next) => {
     if (current.length !== next.length) return false
-    const currentSet = new Set(current)
     for (const item of next) {
-      if (!currentSet.has(item)) return false
+      if (!current.includes(item)) return false
     }
     return true
   }
@@ -1899,9 +1870,7 @@ const startObserver = async (root, contextOrOptions = {}, markdownCont = '') => 
     observeTargets()
   }
   const refreshObserverConfig = () => {
-    observedImgAttributes = context?.observedImgAttributes instanceof Set
-      ? context.observedImgAttributes
-      : new Set(normalizeObserveAttributeFilter(context?.opt?.observeAttributeFilter))
+    observedImgAttributes = new Set(normalizeObserveAttributeFilter(context?.opt?.observeAttributeFilter))
     observeDebounceMs = normalizeNonNegativeNumber(context?.opt?.observeDebounceMs, 0)
   }
 
@@ -1959,7 +1928,7 @@ const startObserver = async (root, contextOrOptions = {}, markdownCont = '') => 
   const scheduleProcess = () => {
     if (disposed) return
     if (observeDebounceMs > 0) {
-      if (debounceHandle) clearTimeout(debounceHandle)
+      if (debounceHandle != null) clearTimeout(debounceHandle)
       debounceHandle = setTimeout(() => {
         debounceHandle = null
         scheduleFrameProcess()
@@ -2060,7 +2029,7 @@ const startObserver = async (root, contextOrOptions = {}, markdownCont = '') => 
     disconnect: () => {
       disposed = true
       observer.disconnect()
-      if (debounceHandle) {
+      if (debounceHandle != null) {
         clearTimeout(debounceHandle)
         debounceHandle = null
       }

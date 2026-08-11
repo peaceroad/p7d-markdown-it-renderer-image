@@ -4,16 +4,13 @@ import path from 'path'
 import mdit from 'markdown-it'
 import mditFrontMatter from 'markdown-it-front-matter'
 import mditRendererImage from '../index.js'
-import { parseFrontmatter, normalizeRelativePath, getFrontmatter, classifyResizeHint, normalizeConditionalResize, setImgSize } from '../script/img-util.js'
+import { parseFrontmatter, normalizeRelativePath, getFrontmatter, classifyResizeHint, normalizeConditionalResize, normalizeResizeValue, setImgSize } from '../script/img-util.js'
 
 let __dirname = path.dirname(new URL(import.meta.url).pathname)
 const isWindows = (process.platform === 'win32')
 if (isWindows) {
   __dirname = __dirname.replace(/^\/+/, '').replace(/\//g, '\\')
 }
-
-
-const md = mdit().use(mditRendererImage, { scaleSuffix: true, resize: true })
 
 const createMdWithFrontMatterPlugin = (options = {}) => {
   const mdInstance = mdit()
@@ -153,7 +150,7 @@ const runTest = (mdInstance, pat, pass, testId) => {
     console.log('Test: ' + n + ' >>>');
     try {
       assert.strictEqual(h, ms[n].html);
-    } catch(e) {
+    } catch {
       pass = false
       console.log(ms[n].markdown);
       console.log('incorrect:');
@@ -486,6 +483,11 @@ try {
     width: 800,
     height: 600,
   })
+  const resizeTitle = 'resize:37.5%'
+  assert.deepStrictEqual(
+    setImgSize('cat.jpg', { width: 800, height: 600 }, false, true, resizeTitle, null),
+    setImgSize('cat.jpg', { width: 800, height: 600 }, false, true, resizeTitle, null, null, undefined, normalizeResizeValue(resizeTitle))
+  )
   assert.deepStrictEqual(normalizeConditionalResize({
     orientation: 'portrait',
     targetWidth: 300.4,

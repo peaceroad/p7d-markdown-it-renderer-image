@@ -8,9 +8,9 @@
    - If `resolveSrc` and frontmatter (or `urlImageBase` option) exist: normalize frontmatter aliases (`page.url` / `images.baseUrl` / `images.stripLocalPrefix` / `local.markdownDir` / `images.scale`, plus legacy flat keys), strip `lid`, build image base (`images.dirUrl` or absolute `urlimage` > `urlimagebase` + url path > `url`), normalize; keep query/hash.
    - Node frontmatter precedence: `env.frontmatter` first; otherwise use `md.frontmatter` / `md.meta` only when the current source starts with YAML frontmatter. Do not rely on `md.env.frontmatter`.
    - Apply `outputUrlMode` to final URL.
-   - Set final `src`/`alt`/`title`. Emit effective resize metadata in `resizeDataAttr` (default `data-img-resize`); emit `${resizeDataAttr}-origin` only for `imagescale`-derived values. Title is removed only when `autoHideResizeTitle` + `resize` + resize-pattern match. Emit `data-img-scale-suffix` when filename scale suffix metadata is available. Optional `decoding`/`loading` and suffix metadata are independent of the sizing extension allowlist.
+   - Set final `src`/`alt`/`title`. Normalize a title resize hint once and reuse it for sizing and metadata. Emit effective resize metadata in `resizeDataAttr` (default `data-img-resize`); emit `${resizeDataAttr}-origin` only for `imagescale`-derived values. Title is removed only when `autoHideResizeTitle` + `resize` + resize-pattern match. Emit `data-img-scale-suffix` when filename scale suffix metadata is available. Optional `decoding`/`loading` and suffix metadata are independent of the sizing extension allowlist.
    - If extension allowed: resolve path (remote vs local via mdPath, which can be a file path or a directory), warn once when mdPath missing, skip remote if `disableRemoteSize`. Runtime `env.mdPath` resolution and per-render sizing state are lazy and are not created for unsupported extensions or skipped remote/external sources.
-   - Load dimensions via `image-size` (local) or `sync-fetch` + `image-size` (remote); protocol-relative remote URLs try `https:` first and `http:` second for measurement only. Respect `remoteMaxBytes` when content-length is present and before decoding downloaded buffers. Per-render cache; global sets de-duplicate errors/warnings. `cacheMax` 0 disables cache.
+   - Load raster dimensions synchronously via `image-dimensions` (local) or `sync-fetch` + `image-dimensions` (remote), with a bounded dedicated root-tag parser for `.svg`. Parse the first 64 KiB before retrying with more data; local and SVG header reads are capped at 512 KiB. Protocol-relative remote URLs try `https:` first and `http:` second for measurement only. Respect `remoteMaxBytes` when content-length is present and before parsing downloaded buffers. Validate positive integer dimensions before use. Per-render cache; global sets de-duplicate errors/warnings. `cacheMax` 0 disables cache.
    - Apply `setImgSize` (scaleSuffix, resize via title, `imagescale`, optional `conditionalResize`, noUpscale always on) and set width/height.
 4. Frontmatter resolution and base URL are cached per render to avoid recompute.
 5. Repeated `.use(...)` calls on the same `md` instance are ignored after the first install to avoid duplicate core-rule execution; use a new `md` instance for different static options.
@@ -20,12 +20,12 @@
    - Also exports `defaultSharedOptions`, `defaultDomOptions`, `defaultNodeOptions` for shared defaults.
    - `runInPreview({ root, markdownCont, observe, ... })` is a high-level helper for preview usage (create context + apply + optional observer).
    - Default export is a no-op shim returning `Promise.resolve()`; `suppressNoopWarning` silences the browser warning.
-2. `createContext(markdownCont, options, root)` parses options and YAML frontmatter (legacy flat keys plus dotted keys and simple nested object forms) and optionally reads `meta[name="markdown-frontmatter"]` when `readMeta: true` (merging `_extensionSettings.rendererImage` unless disabled).
+2. `createContext(markdownCont, options, root)` parses options and YAML frontmatter (legacy flat keys plus dotted keys and simple nested object forms) and optionally reads `meta[name="markdown-frontmatter"]` when `readMeta: true` (merging `_extensionSettings.rendererImage` unless disabled). Contexts keep only render-effective data; module-fixed helpers/constants are used directly, and observer-only attribute sets are allocated lazily by `startObserver`.
 3. `applyImageTransforms(root, contextOrOptions)`:
    - `root` accepts a document/container, a single `<img>`, or an iterable of `<img>` elements, including detached nodes for direct transforms.
    - Applies path rewriting when `resolveSrc: true`, using image base (`images.dirUrl` or absolute `urlimage` > `urlimagebase` + url path > `url`, with `urlImageBase` option as fallback). Non-absolute `images.dirUrl` / `urlimage` values are ignored with a warning.
    - `lmd` handling: keep existing URL schemes; if `lmd` is an absolute local path, convert to `file:///` with URL-encoded segments and a trailing slash; relative `lmd` stays relative.
-   - `previewMode`: `output` | `markdown` | `local`. When not `output`, store final URL in `previewOutputSrcAttr` and cache original `src` in `data-img-src-raw`; when `setDomSrc: true`, reused `<img>` nodes also track the helper-managed display `src` so external `src` edits are picked up instead of reusing stale raw values.
+   - `previewMode`: `output` | `markdown` | `local`. When not `output`, store final URL in `previewOutputSrcAttr` and cache original `src` in `data-img-src-raw`; when `setDomSrc: true`, reused `<img>` nodes retain helper-owned raw/display state across mode changes while accepting external `src` edits as the new raw value.
    - `setDomSrc: false` keeps `img.src` untouched while still running size probes.
    - `enableSizeProbe: false` skips size probing entirely (no network or image load).
    - `keepPreviousDimensionsDuringResizeEdit: true` keeps existing width/height while title is in a `pending` resize state (`src` unchanged + size attrs present).
@@ -35,13 +35,14 @@
    - Optional probe cache across apply runs: `probeCacheMaxEntries` (bounded cache size), `probeCacheTtlMs` (success TTL), `probeNegativeCacheTtlMs` (failed/timeout TTL). A result kind is stored only when its TTL is greater than zero. Success cache is keyed by effective `loadSrc`; failed/timeout cache and in-flight probe requests are keyed by `loadSrc` plus current `sizeProbeTimeoutMs`.
    - Returns a summary object `{ total, processed, pending, sized, failed, timeout, skipped }` and optionally calls `onImageProcessed(img, info)` per image.
    - `onResizeHintEditingStateChange(img, info)` is called on resize-hint state transitions only (`previousState` is `null` on first emit).
+   - Author-provided `loading` / `decoding` attributes remain author-owned even when present with an empty value. Auto-hidden resize state remains active across repeated transforms when `resizeDataAttr` is disabled.
    - Uses `awaitSizeProbes` and `sizeProbeTimeoutMs` to control async sizing.
 4. `applyImageTransformsToString(html, contextOrOptions)` uses `DOMParser` to transform an HTML string and returns the updated HTML.
 5. `startObserver(root, contextOrOptions)` runs a MutationObserver and re-applies transforms; returns `{ disconnect }`.
    - `observeAttributeFilter` customizes which image attributes are observed (default `src/title/alt`).
    - `observeDebounceMs` adds quiet-period debounce in addition to existing rAF batching.
    - When `readMeta` changes observer-related options, observer registration is refreshed to keep attributeFilter behavior consistent. Observer batches discard disconnected stale nodes before invoking the reusable transform API.
-   - If a prebuilt context is passed, observer re-creation uses the original option seed (`context.seedOption`) so runtime meta options are not accidentally frozen as explicit overrides.
+   - If a prebuilt context is passed, observer re-creation uses the original option seed (`context.seedOption`) so runtime meta options are not accidentally frozen as explicit overrides. Contexts skipped by `_extensionSettings` must retain the same seed for later meta-driven re-enablement.
 
 ## Output Metadata (`data-*`)
 - `data-img-resize` stores the effective resize value that contributed to sizing output. It may come from a title resize hint or from frontmatter `imagescale`.
@@ -62,6 +63,11 @@
 - URL/scheme helper regexes are module-level constants to avoid per-call re-allocation on hot paths.
 - Utility helpers treat non-string inputs as empty values to avoid runtime TypeErrors.
 
+## SVG dimensions (`script/svg-dimensions.js`)
+- Parse only the root `<svg>` start tag from at most 512 KiB of UTF-8 or BOM-marked UTF-16 data; skip XML declarations, comments, and DOCTYPE text without resolving entities or external resources.
+- Prefer positive absolute `width` and `height`; use `viewBox` to derive a missing dimension or supply both dimensions when explicit lengths are relative or omitted.
+- Convert unitless values plus `px`, `in`, `cm`, `mm`, `Q`, `pt`, and `pc` to CSS pixels, then validate rounded positive safe integers. Unsupported/invalid lengths and SVG without a usable `viewBox` produce no dimensions.
+
 ## Testing
 - `npm test` for Node-side plugin + YAML frontmatter tests.
 - `npm run test:script` for browser-side DOM handling tests (includes resize metadata/origin and title removal coverage).
@@ -69,7 +75,7 @@
 ## Change checklist
 - Options/API changes: update `script/default-options.js`, Node options, DOM `createContext` / `_extensionSettings.rendererImage` ingestion, README, AGENTS.md, and direct + meta-derived tests together. Removed options should fail fast at every public ingress path.
 - URL/frontmatter changes: test dotted, nested, and legacy aliases; invalid relative `images.dirUrl` / `urlimage`; `lid`; `lmd`; query/hash preservation; protocol-relative URLs; file URLs; non-ASCII names; and encoded `%2F` / `%5C` paths.
-- Sizing changes: test local files, disabled remote sizing, protocol-relative remote fallback, `remoteMaxBytes`, `scaleSuffix`, title `resize`, `imagescale`, `conditionalResize`, and no-upscale clamping.
+- Sizing changes: test local files, disabled remote sizing, protocol-relative remote fallback, `remoteMaxBytes`, SVG explicit dimensions/units/`viewBox`/delayed root/malformed or entity-based input, bounded reads for a large SVG with an early root tag, `scaleSuffix`, title `resize`, `imagescale`, `conditionalResize`, and no-upscale clamping.
 - DOM observer/probe changes: test `readMeta` filter refresh, prebuilt contexts, `observeDebounceMs`, MutationObserver absence, `setDomSrc: false`, `previewMode` variants, probe cache TTLs, and `keepPreviousDimensionsDuringResizeEdit`.
 - Metadata changes: keep `data-img-resize`, `${resizeDataAttr}-origin`, `data-img-scale-suffix`, `data-img-src-raw`, and `previewOutputSrcAttr` semantics synchronized between Node, DOM, README, and tests.
 - Generated preview bundle: when files under `script/` change, run `node example/build-preview-bundle.mjs` and include the regenerated `example/preview-bundle.js` if the example bundle is meant to stay current.

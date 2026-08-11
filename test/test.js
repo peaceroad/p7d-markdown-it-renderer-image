@@ -78,7 +78,7 @@ try {
     disableRemoteSize: true,
     suppressErrors: 'all',
   })
-  mdLazyRuntimePath.render('![Alt](cat.svg)', { mdPath: runtimeMdPath })
+  mdLazyRuntimePath.render('![Alt](cat.bmp)', { mdPath: runtimeMdPath })
   mdLazyRuntimePath.render('![Alt](https://example.com/cat.jpg)', { mdPath: runtimeMdPath })
   assert.strictEqual(runtimeMdPathReads, 0)
   mdLazyRuntimePath.render('![Alt](cat.jpg)', { mdPath: runtimeMdPath })
@@ -89,8 +89,8 @@ try {
     asyncDecode: true,
   })
   assert.strictEqual(
-    mdNonSizedAttributes.render('![Alt](icon@2x.svg)'),
-    '<p><img src="icon@2x.svg" alt="Alt" data-img-scale-suffix="2x" decoding="async" loading="lazy"></p>\n'
+    mdNonSizedAttributes.render('![Alt](icon@2x.bmp)'),
+    '<p><img src="icon@2x.bmp" alt="Alt" data-img-scale-suffix="2x" decoding="async" loading="lazy"></p>\n'
   )
   const originalConsoleWarn = console.warn
   const duplicateUseWarnings = []
@@ -123,10 +123,10 @@ try {
   } finally {
     console.warn = originalConsoleWarn
   }
-} catch (e) {
+} catch (error) {
   pass = false
   console.log('incorrect(setup guards): ')
-  console.log(e.message)
+  console.log(error.message)
 }
 
 const isRemoteImgHtml = (html) => /<img[^>]+src="(?:https?:)?\/\/[^"]+"/i.test(html)
@@ -143,7 +143,13 @@ const startProtocolRelativeImageServer = async (imagePath) => {
     "const http = require('http')",
     "const fs = require('fs')",
     "const imagePath = workerData.imagePath",
+    "const svg = Buffer.from('<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 640 360\"></svg>')",
     "const server = http.createServer((req, res) => {",
+    "  if (req.url === '/diagram.svg') {",
+    "    res.writeHead(200, { 'Content-Type': 'image/svg+xml', 'Content-Length': svg.length })",
+    "    res.end(svg)",
+    "    return",
+    "  }",
     "  if (req.url !== '/cat.jpg') {",
     "    res.writeHead(404)",
     "    res.end('not found')",
@@ -229,7 +235,7 @@ const h0 = md.render(fs.readFileSync(__dirname + '/test.md', 'utf-8').trim(), {'
 const c0 = '<p><img src="cat.jpg" alt="A cat" width="400" height="300"></p>\n';
 try {
   assert.ok(htmlMatches(h0, c0));
-} catch(e) {
+} catch {
   pass = false
   console.log('incorrect(0): ');
   console.log('H: ' + h0 +'C: ' + c0);
@@ -240,7 +246,7 @@ const hDir = mdDir.render('![A cat](cat.jpg)', {});
 const cDir = '<p><img src="cat.jpg" alt="A cat" width="400" height="300"></p>\n';
 try {
   assert.ok(htmlMatches(hDir, cDir));
-} catch(e) {
+} catch {
   pass = false
   console.log('incorrect(mdPath dir): ');
   console.log('H: ' + hDir +'C: ' + cDir);
@@ -250,7 +256,7 @@ const hResizeDataAttr = mdResizeDataAttr.render('![Figure](cat.jpg "resize:50%")
 const cResizeDataAttr = '<p><img src="cat.jpg" alt="Figure" width="200" height="150" data-img-resize="50%"></p>\n';
 try {
   assert.ok(htmlMatches(hResizeDataAttr, cResizeDataAttr));
-} catch(e) {
+} catch {
   pass = false
   console.log('incorrect(resizeDataAttr): ');
   console.log('H: ' + hResizeDataAttr +'C: ' + cResizeDataAttr);
@@ -260,7 +266,7 @@ const hNoUpscale = mdNoUpscale.render('![Figure](cat.jpg "resize:200%")', {'mdPa
 const cNoUpscale = '<p><img src="cat.jpg" alt="Figure" width="400" height="300" data-img-resize="200%"></p>\n';
 try {
   assert.ok(htmlMatches(hNoUpscale, cNoUpscale));
-} catch(e) {
+} catch {
   pass = false
   console.log('incorrect(noUpscale): ');
   console.log('H: ' + hNoUpscale +'C: ' + cNoUpscale);
@@ -278,7 +284,7 @@ while(n < ms.length) {
   const h = md.render(m, renderEnv);
   try {
     assert.ok(htmlMatches(h, ms[n].html));
-  } catch(e) {
+  } catch {
     pass = false
     console.log('incorrect: ');
     console.log('H: ' + h +'C: ' + ms[n].html);
@@ -288,7 +294,7 @@ while(n < ms.length) {
     const hLazy = mdLazy.render(m, renderEnv);
     try {
       assert.ok(htmlMatches(hLazy, ms[n].htmlLazy));
-    } catch(e) {
+    } catch {
       pass = false
       console.log('incorrect(Lazy): ');
       console.log('H: ' + hLazy +'C: ' + ms[n].htmlLazy);
@@ -299,7 +305,7 @@ while(n < ms.length) {
     const hEnvPat = mdEnvPat.render(m);
     try {
       assert.ok(htmlMatches(hEnvPat, ms[n].html));
-    } catch(e) {
+    } catch {
       pass = false
       console.log('incorrect(mdEnvPat): ');
       console.log('H: ' + hEnvPat +'C: ' + ms[n].html);
@@ -323,7 +329,7 @@ while(n < msHide.length) {
   const h = mdHideDefault.render(m, renderEnv);
   try {
     assert.ok(htmlMatches(h, msHide[n].html));
-  } catch(e) {
+  } catch {
     pass = false
     console.log('incorrect(autoHideResizeTitle default): ');
     console.log('H: ' + h +'C: ' + msHide[n].html);
@@ -359,10 +365,13 @@ try {
       `Expected https/http fallback log for protocol-relative URL. Logs: ${protocolRelativeErrors.join(' | ')}`
     )
   }
-} catch (e) {
+  const hRemoteSvg = mdProtocolRelativeRemote.render(`![Diagram](http://127.0.0.1:${protocolRelativeServer.port}/diagram.svg)`)
+  assert.match(hRemoteSvg, /width="640"/)
+  assert.match(hRemoteSvg, /height="360"/)
+} catch (error) {
   pass = false
   console.log('incorrect(protocol-relative remote fallback): ')
-  console.log(e.message)
+  console.log(error.message)
 } finally {
   console.error = originalConsoleError
   await protocolRelativeServer?.stop()
