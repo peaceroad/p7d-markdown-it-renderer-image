@@ -174,7 +174,7 @@ url: https://example.com/article/number
 
 ![](cat.jpg)`
   const hMetaFallback = mdWithFrontMatterPlugin.render(rawMetaMarkdown)
-  assert.strictEqual(hMetaFallback, '\n<p><img src="https://example.com/article/number/cat.jpg" alt="" width="400" height="300"></p>\n')
+  assert.strictEqual(hMetaFallback, '<p><img src="https://example.com/article/number/cat.jpg" alt="" width="400" height="300"></p>\n')
 
   const hMetaNoLeak = mdWithFrontMatterPlugin.render('![](cat.jpg)')
   assert.strictEqual(hMetaNoLeak, '<p><img src="cat.jpg" alt="" width="400" height="300"></p>\n')
@@ -184,7 +184,7 @@ url: https://example.com/article/number
       url: 'https://override.example.com/base/',
     },
   })
-  assert.strictEqual(hEnvPriority, '\n<p><img src="https://override.example.com/base/cat.jpg" alt="" width="400" height="300"></p>\n')
+  assert.strictEqual(hEnvPriority, '<p><img src="https://override.example.com/base/cat.jpg" alt="" width="400" height="300"></p>\n')
 } catch (e) {
   pass = false
   console.log('incorrect(md.frontmatter fallback safety): ')

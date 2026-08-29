@@ -71,6 +71,7 @@
 ## Testing
 - `npm test` for Node-side plugin + YAML frontmatter tests.
 - `npm run test:script` for browser-side DOM handling tests (includes resize metadata/origin and title removal coverage).
+- markdown-it 15 coverage includes formatted/code/entity alt text, escaped reference-image alt text and label metadata, built-in presets, both figure-plugin installation orders, and frontmatter-adjacent renderer whitespace.
 
 ## Change checklist
 - Options/API changes: update `script/default-options.js`, Node options, DOM `createContext` / `_extensionSettings.rendererImage` ingestion, README, AGENTS.md, and direct + meta-derived tests together. Removed options should fail fast at every public ingress path.
@@ -79,6 +80,7 @@
 - DOM observer/probe changes: test `readMeta` filter refresh, prebuilt contexts, `observeDebounceMs`, MutationObserver absence, `setDomSrc: false`, `previewMode` variants, probe cache TTLs, and `keepPreviousDimensionsDuringResizeEdit`.
 - Metadata changes: keep `data-img-resize`, `${resizeDataAttr}-origin`, `data-img-scale-suffix`, `data-img-src-raw`, and `previewOutputSrcAttr` semantics synchronized between Node, DOM, README, and tests.
 - Generated preview bundle: when files under `script/` change, run `node example/build-preview-bundle.mjs` and include the regenerated `example/preview-bundle.js` if the example bundle is meant to stay current.
+- markdown-it development dependency changes: review the upstream migration notes for removed deep imports and browser artifact moves, then smoke-test the example's browser bundle path in addition to the Node plugin stack.
 
 ## Concerns / notes
 - VS Code Webview blocks `file://`; pass `lmd` as a Webview URI from the extension (e.g., `asWebviewUri`) instead of a raw path.

@@ -41,8 +41,8 @@
     "sync-fetch": "^0.6.0"
   },
   "devDependencies": {
-    "@peaceroad/markdown-it-figure-with-p-caption": "^0.19.0",
-    "markdown-it": "^14.3.0",
+    "@peaceroad/markdown-it-figure-with-p-caption": "^0.20.0",
+    "markdown-it": "^15.0.1",
     "markdown-it-front-matter": "^0.2.4"
   }
 }

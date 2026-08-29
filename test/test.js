@@ -3,6 +3,7 @@ import fs from 'fs'
 import path from 'path'
 import mdit from 'markdown-it'
 import { Worker } from 'worker_threads'
+import mditFigureWithPCaption from '@peaceroad/markdown-it-figure-with-p-caption'
 import mditRendererImage, { runInPreview } from '../index.js'
 
 let __dirname = path.dirname(new URL(import.meta.url).pathname)
@@ -67,6 +68,40 @@ try {
     mdit('zero').use(mditRendererImage, presetOptions).render('![Alt](cat.jpg)'),
     '<p>![Alt](cat.jpg)</p>\n'
   )
+  const mdV15Compatibility = mdit().use(mditRendererImage, presetOptions)
+  assert.strictEqual(
+    mdV15Compatibility.render('![a *b* `code` &copy;](cat.jpg)'),
+    '<p><img src="cat.jpg" alt="a b code ©"></p>\n'
+  )
+  const referenceTokens = mdV15Compatibility.parse(
+    '[Image Label]: cat.jpg\n\n![a\\*b][Image Label]',
+    {}
+  )
+  const referenceImage = referenceTokens
+    .flatMap((token) => token.children || [])
+    .find((token) => token.type === 'image')
+  assert.strictEqual(referenceImage?.meta?.label, 'IMAGE LABEL')
+  assert.strictEqual(
+    mdV15Compatibility.renderer.render(referenceTokens, mdV15Compatibility.options, {}),
+    '<p><img src="cat.jpg" alt="a*b"></p>\n'
+  )
+  const figureOptions = { imageOnlyParagraphWithoutCaption: true }
+  for (const plugins of [
+    [mditRendererImage, mditFigureWithPCaption],
+    [mditFigureWithPCaption, mditRendererImage],
+  ]) {
+    const mdWithFigure = mdit()
+    for (const plugin of plugins) {
+      mdWithFigure.use(
+        plugin,
+        plugin === mditRendererImage ? presetOptions : figureOptions
+      )
+    }
+    assert.strictEqual(
+      mdWithFigure.render('![a *b* `code` &copy;](cat.jpg)'),
+      '<figure class="f-img">\n<img src="cat.jpg" alt="a b code ©">\n</figure>\n'
+    )
+  }
   let runtimeMdPathReads = 0
   const runtimeMdPath = {
     toString: () => {
